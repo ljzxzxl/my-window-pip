@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>MyWindowPip</string>
+    <key>CFBundleDisplayName</key>
+    <string>MyWindowPip</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.ljzxzxl.mywindowpip</string>
+    <key>CFBundleExecutable</key>
+    <string>my-window-pip</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>MyWindowPip 需要屏幕录制权限，才能把你选中的窗口实时镜像到画中画浮窗。所有画面只在本机内存中流转，不会保存或上传。</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>用于识别前台应用与窗口标题，便于选择要画中画的窗口。</string>
+</dict>
+</plist>
