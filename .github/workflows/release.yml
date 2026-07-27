@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 tag 与 VERSION 一致
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE="$(tr -d '[:space:]' < VERSION)"
+          if [ "$TAG" != "$FILE" ]; then
+            echo "tag ($TAG) 与 VERSION 文件 ($FILE) 不一致"
+            exit 1
+          fi
+
+      - name: 构建 App（通用二进制）
+        run: bash scripts/build-app.sh
+
+      - name: 打包 DMG
+        run: bash packaging/make-dmg.sh
+
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          generate_release_notes: true
