@@ -28,9 +28,11 @@ It uses the system [ScreenCaptureKit](https://developer.apple.com/documentation/
 - Frame rate, resolution and crop changes all go through `SCStream.updateConfiguration` — no stream rebuild, no black frames
 
 **Interaction**
-- Auto-hide with click-through: the window fades out and pauses when the pointer moves over it, so you can work with what's behind it
-- Hover overlay controls: pause, frame rate, reset zoom, auto-hide, idle detection, close
+- Auto-hide with click-through: the window fades out and pauses when the pointer moves over it, so you can work with what's behind it; while faded, **hold `⌥` to peek** (full opacity and clickable again), or turn auto-hide off from the window's menu bar submenu
+- The faded opacity is configurable in 5% steps (default 35%) from Settings, the window's right-click menu, or the menu bar submenu
+- Hover overlay controls: pause, frame rate, reset zoom, auto-hide, idle detection, close; hints appear **instantly** when the pointer enters an icon (drawn inside the PiP window, so they are never hidden behind it)
 - The right-click menu exposes every action, so the app is fully usable without extra permissions
+- Every entry under "Active PiP" in the menu bar has a submenu: bring to front / pause / auto-hide / idle detection / opacity / frame rate / close
 - Source minimized → placeholder and automatic resume; source closed → notice, then auto-close; source app relaunched → reconnect by app + title
 - Update check via GitHub Releases
 
@@ -46,6 +48,7 @@ It uses the system [ScreenCaptureKit](https://developer.apple.com/documentation/
 | Zoom | `Cmd` + drag / `Cmd` + scroll | pointer over PiP |
 | Reset zoom | `Cmd` + double-click | pointer over PiP |
 | Pan | scroll | when zoomed |
+| **Peek at a faded window** | hold `⌥` | while auto-hide has faded it to click-through |
 
 **Enhanced mode (optional, requires Accessibility)** adds:
 
@@ -68,6 +71,8 @@ Enhanced mode is off by default. When on, only the keys above are intercepted, h
 | Accessibility | optional | enhanced mode only (fn hotkeys, hover keys) |
 
 Frames stay in local memory and VRAM: nothing is written to disk, uploaded, or reported.
+
+The system permission prompt appears on first launch and the app registers itself under System Settings → Privacy & Security → Screen & System Audio Recording, so **you just flip the switch — no need to add it manually with the "+" button**. macOS only applies the grant after a restart; the guide dialog has a "Relaunch app" button for that.
 
 > Ad-hoc signed apps get a new code hash on every build, so macOS may ask for Screen Recording again.
 > Run `bash scripts/reset-permission.sh` after rebuilding, or use `bash scripts/build-app.sh --install`

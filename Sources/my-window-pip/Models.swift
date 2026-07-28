@@ -188,6 +188,8 @@ protocol PiPWindowDelegate: AnyObject {
     func pipDidResize(pointSize: CGSize, scale: CGFloat)
     func pipRequestFPS(_ fps: FPSStep)
     func pipRequestToggleAutoHide()
+    /// 请求把全局「自动隐藏透明度」改为指定值（0.05…0.95，5% 一档）
+    func pipRequestAutoHideOpacity(_ opacity: CGFloat)
     func pipRequestToggleIdleDetection()
     func pipRequestTogglePause()
     func pipDidMove()

@@ -7,6 +7,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     /// 浮窗层级变化后需要应用到已打开的浮窗
     var onLevelModeChanged: ((WindowLevelMode) -> Void)?
+    /// 自动隐藏透明度变化后需要应用到已打开的浮窗
+    var onAutoHideOpacityChanged: ((CGFloat) -> Void)?
 
     private var window: NSWindow?
     private var hotkeyStatusLabel: NSTextField?
@@ -84,6 +86,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 "New PiP windows start with auto-hide enabled"),
             on: prefs.autoHideDefault, action: #selector(autoHideChanged(_:))
         ))
+
+        let opacityPopup = NSPopUpButton()
+        for step in Preferences.autoHideOpacitySteps {
+            opacityPopup.addItem(withTitle: Preferences.opacityLabel(step))
+        }
+        let currentOpacity = Preferences.nearestOpacityStep(prefs.autoHideOpacity)
+        opacityPopup.selectItem(at: Preferences.autoHideOpacitySteps.firstIndex(where: {
+            abs($0 - currentOpacity) < 0.001
+        }) ?? 6)
+        opacityPopup.target = self
+        opacityPopup.action = #selector(autoHideOpacityChanged(_:))
+        stack.addArrangedSubview(row(L.t("自动隐藏后的不透明度", "Opacity while faded out"), opacityPopup))
         stack.addArrangedSubview(checkbox(
             L.t("默认开启静止检测（画面不变时自动降到 1 fps）",
                 "Enable idle detection by default (drops to 1 fps when static)"),
@@ -102,8 +116,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(loginBox)
 
         stack.addArrangedSubview(hint(L.t(
-            "帧率建议：看终端/日志 1–5 fps；看仪表盘 10–15 fps；看视频 30–60 fps。",
-            "Suggested: 1–5 fps for terminals and logs, 10–15 fps for dashboards, 30–60 fps for video."
+            "帧率建议：看终端/日志 1–5 fps；看仪表盘 10–15 fps；看视频 30–60 fps。\n"
+                + "自动隐藏淡出后浮窗会点击穿透，此时按住 ⌥ 可临时唤回，或从菜单栏的浮窗子菜单里关掉。",
+            "Suggested: 1–5 fps for terminals and logs, 10–15 fps for dashboards, 30–60 fps for video.\n"
+                + "A faded PiP window is click-through — hold ⌥ to peek, or turn auto-hide off from its menu bar submenu."
         )))
         return wrap(stack)
     }
@@ -264,6 +280,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func autoHideChanged(_ sender: NSButton) {
         prefs.autoHideDefault = sender.state == .on
+    }
+
+    @objc private func autoHideOpacityChanged(_ sender: NSPopUpButton) {
+        let index = max(0, min(sender.indexOfSelectedItem, Preferences.autoHideOpacitySteps.count - 1))
+        let value = Preferences.autoHideOpacitySteps[index]
+        prefs.autoHideOpacity = value
+        onAutoHideOpacityChanged?(value)
     }
 
     @objc private func idleChanged(_ sender: NSButton) {

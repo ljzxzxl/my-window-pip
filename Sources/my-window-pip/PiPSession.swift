@@ -23,6 +23,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     // 运行期辅助状态
     private var isAutoHidden = false
+    /// 自动隐藏淡出后，按住 ⌥ 的「临时唤回」态
+    private var isPeeking = false
     private var idleThrottled = false
     private var reconnectAttempt = 0
     private var reconnectWork: DispatchWorkItem?
@@ -100,6 +102,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     /// 仅用于 `--smoke` 集成自检的调试信息
     var debugWindowFrame: CGRect { windowController.window.frame }
+    var debugAlpha: CGFloat { windowController.window.alphaValue }
+    var debugClickThrough: Bool { windowController.window.ignoresMouseEvents }
+    var debugAutoHideActive: Bool { isAutoHidden }
+    var debugPeeking: Bool { isPeeking }
 
     func setLevelMode(_ mode: WindowLevelMode) { windowController.setLevelMode(mode) }
 
@@ -123,6 +129,12 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         idleDetector.reset()
         retune()
         windowController.update(state: state)
+    }
+
+    /// 全局透明度偏好被别处改动（设置页）时调用：只对正处于淡出态的浮窗立即生效，不弹提示。
+    func refreshAutoHideOpacity() {
+        guard !isClosed, isAutoHidden, !isPeeking else { return }
+        windowController.setAlpha(Preferences.shared.autoHideOpacity, animated: true)
     }
 
     func applyZoom(_ zoom: CGFloat, anchor: CGPoint) {
@@ -152,7 +164,40 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     func toggleAutoHide() {
         state.autoHide.toggle()
-        if !state.autoHide, isAutoHidden { endAutoHide() }
+        windowController.update(state: state)
+
+        guard state.autoHide else {
+            endAutoHide()
+            return
+        }
+
+        // 用户是点浮窗上的按钮开启的，此刻鼠标正在浮窗上：先把玩法讲清楚，
+        // 3 秒后再真正淡出，否则用户会直接掉进「淡出 + 点击穿透」里找不到出口。
+        windowController.showHint(
+            L.t("鼠标移入将淡出；按住 ⌥ 可临时唤回，也可从菜单栏关闭",
+                "Fades out on hover — hold ⌥ to peek, or turn it off from the menu bar"),
+            near: nil, duration: 3.0
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self, !self.isClosed, self.state.autoHide, !self.state.isHidden,
+                  HoverMonitor.shared.currentHovered() == self.id,
+                  !NSEvent.modifierFlags.contains(.option) else { return }
+            self.beginAutoHide()
+        }
+    }
+
+    /// 修改全局「自动隐藏透明度」（5% 一档），当前处于淡出态时立即生效。
+    func setAutoHideOpacity(_ opacity: CGFloat) {
+        let value = Preferences.clampOpacity(opacity)
+        Preferences.shared.autoHideOpacity = value
+        if isAutoHidden, !isPeeking {
+            windowController.setAlpha(value, animated: true)
+        }
+        windowController.showHint(
+            L.t("自动隐藏透明度 \(Preferences.opacityLabel(value))",
+                "Auto-hide opacity \(Preferences.opacityLabel(value))"),
+            near: nil, duration: 1.5
+        )
         windowController.update(state: state)
     }
 
@@ -425,35 +470,71 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 guard let self, !self.isClosed, !self.state.isHidden else { return nil }
                 return self.windowController.window.frame
             },
-            onChange: { [weak self] hovering in
-                self?.setHovering(hovering)
+            onChange: { [weak self] hover in
+                self?.handleHover(hover)
             }
         )
     }
 
-    private func setHovering(_ hovering: Bool) {
+    /// 悬停状态处理。
+    ///
+    /// 自动隐藏开启后浮窗会淡出并点击穿透，此时它收不到任何鼠标事件——
+    /// 所以必须留逃生通道：**按住 ⌥ 临时唤回**（不透明 + 可点击 + 显示控制条），
+    /// 松开 ⌥ 回到淡出态。另一条保底出口在菜单栏的每会话子菜单里。
+    private func handleHover(_ hover: HoverState) {
         guard !isClosed else { return }
-        if state.autoHide {
-            if hovering { beginAutoHide() } else { endAutoHide() }
+
+        guard state.autoHide else {
+            isPeeking = false
+            windowController.setControlsVisible(hover.isHovering)
+            return
+        }
+
+        guard hover.isHovering else {
+            endAutoHide()
+            return
+        }
+
+        if hover.optionHeld {
+            beginPeek()
         } else {
-            windowController.setControlsVisible(hovering)
+            beginAutoHide()
         }
     }
 
     private func beginAutoHide() {
-        guard !isAutoHidden else { return }
+        guard !isAutoHidden || isPeeking else { return }
         isAutoHidden = true
-        windowController.setAlpha(0.08, animated: true)
+        isPeeking = false
+        windowController.showHint(nil, near: nil)
+        windowController.setAlpha(Preferences.shared.autoHideOpacity, animated: true)
         windowController.setClickThrough(true)
         windowController.setControlsVisible(false)
         if !state.isPaused { engine.pause() }
     }
 
-    private func endAutoHide() {
-        guard isAutoHidden else { return }
-        isAutoHidden = false
+    /// 按住 ⌥ 临时唤回：恢复不透明与可点击，让用户能点掉眼睛图标或调出右键菜单。
+    private func beginPeek() {
+        guard !isPeeking else { return }
+        isPeeking = true
+        isAutoHidden = true
         windowController.setAlpha(1, animated: true)
         windowController.setClickThrough(false)
+        windowController.setControlsVisible(true)
+        if !state.isPaused, !state.isHidden { engine.resume() }
+        windowController.showHint(
+            L.t("松开 ⌥ 恢复透明", "Release ⌥ to fade again"), near: nil
+        )
+    }
+
+    private func endAutoHide() {
+        guard isAutoHidden || isPeeking else { return }
+        isAutoHidden = false
+        isPeeking = false
+        windowController.showHint(nil, near: nil)
+        windowController.setAlpha(1, animated: true)
+        windowController.setClickThrough(false)
+        windowController.setControlsVisible(false)
         if !state.isPaused, !state.isHidden { engine.resume() }
     }
 
@@ -515,6 +596,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func pipRequestFPS(_ fps: FPSStep) { setFPS(fps) }
 
     func pipRequestToggleAutoHide() { toggleAutoHide() }
+
+    func pipRequestAutoHideOpacity(_ opacity: CGFloat) { setAutoHideOpacity(opacity) }
 
     func pipRequestToggleIdleDetection() { toggleIdleDetection() }
 

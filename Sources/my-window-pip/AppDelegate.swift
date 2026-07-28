@@ -23,9 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.warn("增强模式无法启用（辅助功能权限缺失），已回退到零权限模式")
         }
 
-        // 首次运行且未授权时给出一次引导，避免用户按热键没反应
+        // 首次运行且未授权时：先向系统申请（这一步会弹系统授权框，并把本应用登记进
+        // 「屏幕录制与系统录音」列表，用户直接开开关即可，不用手动点加号），
+        // 仍未授权才显示我们的引导框。菜单栏的告警项会在下次打开菜单时自动消失。
         if !Permissions.hasScreenRecording {
-            Permissions.showScreenRecordingGuide()
+            Permissions.ensureScreenRecording()
         }
 
         Updater.checkSilently { [weak self] info in
@@ -33,6 +35,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if CommandLine.arguments.contains("--smoke") { runSmokeTest() }
+        if CommandLine.arguments.contains("--smoke-autohide") { runAutoHideRegression() }
+    }
+
+    /// `--smoke-autohide`：自动隐藏回归自检。
+    /// 建一路 PiP → 开自动隐藏 → 把鼠标移入浮窗 → 检查是否按配置的透明度淡出并进入点击穿透
+    /// → 把鼠标移出 → 检查是否完全恢复。会短暂移动鼠标指针，跑完自动退出。
+    private func runAutoHideRegression() {
+        Log.info("[autohide] 开始回归自检，期望淡出透明度 \(Preferences.shared.autoHideOpacity)")
+        var session: PiPSession?
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            SessionStore.shared.pipFrontmostWindow()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            session = SessionStore.shared.sessions.first
+            guard let session else {
+                Log.error("[autohide] 没能建立会话")
+                NSApp.terminate(nil)
+                return
+            }
+            session.toggleAutoHide()
+            Log.info("[autohide] 已开启自动隐藏，把鼠标移入浮窗中心")
+            Self.warpMouse(to: CGPoint(x: session.debugWindowFrame.midX,
+                                       y: session.debugWindowFrame.midY))
+        }
+        // 开启时有 3 秒说明提示，之后才淡出，所以这里等到第 8 秒再检查
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            guard let session else { return }
+            Log.info("""
+                [autohide] 悬停态：alpha=\(String(format: "%.2f", session.debugAlpha)) \
+                点击穿透=\(session.debugClickThrough) 淡出中=\(session.debugAutoHideActive) \
+                peek=\(session.debugPeeking)
+                """)
+            Log.info("[autohide] 把鼠标移出浮窗")
+            let frame = session.debugWindowFrame
+            Self.warpMouse(to: CGPoint(x: max(4, frame.minX - 80), y: frame.midY))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            guard let session else { return }
+            Log.info("""
+                [autohide] 离开后：alpha=\(String(format: "%.2f", session.debugAlpha)) \
+                点击穿透=\(session.debugClickThrough) 淡出中=\(session.debugAutoHideActive)
+                """)
+            SessionStore.shared.closeAll()
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// AppKit 坐标（左下原点）→ CG 坐标（左上原点）后移动指针。
+    private static func warpMouse(to point: CGPoint) {
+        let cg = CGPoint(x: point.x, y: Geo.primaryScreenMaxY - point.y)
+        CGWarpMouseCursorPosition(cg)
+        CGAssociateMouseAndMouseCursorPosition(1)
     }
 
     /// `--smoke [秒数]`：启动后自动给前台窗口开一个 PiP，跑一段时间再自动退出。
@@ -113,6 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func wireSettings() {
         SettingsWindowController.shared.onLevelModeChanged = { mode in
             SessionStore.shared.applyLevelMode(mode)
+        }
+        SettingsWindowController.shared.onAutoHideOpacityChanged = { opacity in
+            SessionStore.shared.applyAutoHideOpacity(opacity)
         }
     }
 

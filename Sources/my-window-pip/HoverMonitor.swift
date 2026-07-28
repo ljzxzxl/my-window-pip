@@ -1,5 +1,14 @@
 import AppKit
 
+/// 鼠标悬停状态。除了「是否悬停」，还带上 ⌥ 键状态：
+/// 自动隐藏（点击穿透）时浮窗收不到任何事件，只能靠这里轮询出来的修饰键做「临时唤回」。
+struct HoverState: Equatable {
+    var isHovering: Bool
+    var optionHeld: Bool
+
+    static let none = HoverState(isHovering: false, optionHeld: false)
+}
+
 /// 鼠标悬停监控。
 ///
 /// 为什么用轮询而不是 `NSTrackingArea` / 全局事件监听：
@@ -11,7 +20,8 @@ final class HoverMonitor {
 
     private struct Entry {
         let frameProvider: () -> CGRect?
-        let onChange: (Bool) -> Void
+        let onChange: (HoverState) -> Void
+        var lastState: HoverState
     }
 
     private var entries: [UUID: Entry] = [:]
@@ -28,8 +38,9 @@ final class HoverMonitor {
     // MARK: - 注册
 
     /// 注册一个需要监控的浮窗。`frameProvider` 返回 nil 表示该窗口当前不参与命中（隐藏/关闭中）。
-    func register(id: UUID, frameProvider: @escaping () -> CGRect?, onChange: @escaping (Bool) -> Void) {
-        entries[id] = Entry(frameProvider: frameProvider, onChange: onChange)
+    func register(id: UUID, frameProvider: @escaping () -> CGRect?,
+                  onChange: @escaping (HoverState) -> Void) {
+        entries[id] = Entry(frameProvider: frameProvider, onChange: onChange, lastState: .none)
         startIfNeeded()
     }
 
@@ -63,6 +74,8 @@ final class HoverMonitor {
 
     @objc private func tick() {
         let mouse = NSEvent.mouseLocation
+        let optionHeld = NSEvent.modifierFlags.contains(.option)
+
         // 命中最上面的一个：按注册顺序无法判断 z 序，改为取包含鼠标且面积最小的窗口，
         // 多个浮窗重叠时体验上更符合直觉。
         var hit: (id: UUID, area: CGFloat)?
@@ -71,16 +84,15 @@ final class HoverMonitor {
             let area = frame.width * frame.height
             if hit == nil || area < hit!.area { hit = (id, area) }
         }
+        hoveredID = hit?.id
 
-        let newID = hit?.id
-        guard newID != hoveredID else { return }
-
-        if let old = hoveredID, let entry = entries[old] {
-            entry.onChange(false)
-        }
-        hoveredID = newID
-        if let new = newID, let entry = entries[new] {
-            entry.onChange(true)
+        // 逐个派发：状态没变化就不回调，避免每 100ms 触发一次动画
+        for (id, entry) in entries {
+            let state = HoverState(isHovering: id == hoveredID,
+                                   optionHeld: id == hoveredID ? optionHeld : false)
+            guard state != entry.lastState else { continue }
+            entries[id]?.lastState = state
+            entry.onChange(state)
         }
     }
 }

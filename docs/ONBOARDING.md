@@ -32,6 +32,8 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **不跨帧持有 `CMSampleBuffer`**，`queueDepth = 3`，宁丢帧不积压。
 - **防镜中镜**：浮窗 `sharingType = .none`；窗口枚举过滤自身 App；区域捕获的显示器过滤器按 App 排除自己。
 - **零权限优先**：任何功能都必须能在「只有屏幕录制权限」的前提下通过控制条或右键菜单完成；辅助功能权限只允许作为增强项。
+- **不用系统 tooltip**：浮窗 level 是 `.screenSaver`(1000)，系统 tooltip 窗口层级更低会被压在浮窗后面，而且初始延迟不可调。所有浮窗内的提示统一走 `PiPWindowController.showHint(_:near:duration:)`，画在窗口自己里，零延迟。新增按钮时记得把提示文案登记到 `OverlayControlsView` 的 hint 映射里，不要再写 `toolTip`。
+- **自动隐藏必须留逃生通道**：淡出后浮窗 `ignoresMouseEvents = true`，收不到任何鼠标事件。逃生通道有三条：按住 ⌥ 临时唤回（`HoverMonitor` 轮询修饰键实现）、菜单栏每会话子菜单、开启时的 3 秒提示。改动自动隐藏逻辑时这三条不能破。
 - **双语**：用户可见字符串一律 `L.t("中文", "English")`，不引入 `.lproj`。
 
 ## 常用命令
@@ -70,3 +72,5 @@ swiftc -typecheck -target x86_64-apple-macos14.0 \
 - 改帧率没反应：确认 `IdleDetector` 没把它压到 1 fps（`--debug` 日志里有「静止检测」记录）。
 - 热键没反应：`HotkeyManager.failedActions` 非空说明被别的应用占用，设置页会提示；`fn` 组合键必须开增强模式。
 - 增强模式突然失灵：系统会在负载高时禁用事件监听，`EventTapManager` 已监听 `tapDisabledByTimeout` 自动恢复，日志里能看到告警。
+- 系统设置的「屏幕录制」列表里没有本应用：说明启动路径没走 `Permissions.ensureScreenRecording()`（它内部会先 `CGRequestScreenCaptureAccess()` 再补一次 `SCShareableContent` 探测，TCC 只有被真正请求过才会建条目）。
+- 浮窗淡出后点不到任何东西：这是点击穿透的预期行为，按住 ⌥ 临时唤回，或从菜单栏该浮窗的子菜单关掉自动隐藏。

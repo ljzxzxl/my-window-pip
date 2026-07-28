@@ -182,8 +182,8 @@ final class PlaceholderView: NSView {
             return Content(
                 symbols: ["lock.circle"],
                 title: L.t("缺少屏幕录制权限", "Screen Recording permission required"),
-                subtitle: L.t("请在「系统设置 → 隐私与安全性 → 屏幕录制与系统录音」中勾选 MyWindowPip",
-                              "Enable MyWindowPip in System Settings → Privacy & Security → Screen & System Audio Recording"),
+                subtitle: L.t("在「系统设置 → 隐私与安全性 → 屏幕录制与系统录音」里打开 MyWindowPip 的开关，然后重启本应用",
+                              "Turn MyWindowPip on in System Settings → Privacy & Security → Screen & System Audio Recording, then relaunch"),
                 isAlert: true,
                 actionTitle: L.t("打开系统设置", "Open System Settings")
             )

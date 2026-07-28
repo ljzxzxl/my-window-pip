@@ -91,6 +91,7 @@ final class Preferences {
         static let enhancedMode = "enhancedMode"
         static let defaultFPS = "defaultFPS"
         static let autoHideDefault = "autoHideDefault"
+        static let autoHideOpacity = "autoHideOpacity"
         static let idleDetectionDefault = "idleDetectionDefault"
         static let windowLevelMode = "windowLevelMode"
         static let launchAtLogin = "launchAtLogin"
@@ -101,6 +102,7 @@ final class Preferences {
         d.register(defaults: [
             K.defaultFPS: FPSStep.fifteen.rawValue,
             K.autoHideDefault: false,
+            K.autoHideOpacity: Double(Self.defaultAutoHideOpacity),
             K.idleDetectionDefault: true,
             K.enhancedMode: false,
             K.windowLevelMode: WindowLevelMode.global.rawValue,
@@ -118,6 +120,34 @@ final class Preferences {
     var autoHideDefault: Bool {
         get { d.bool(forKey: K.autoHideDefault) }
         set { d.set(newValue, forKey: K.autoHideDefault) }
+    }
+
+    /// 自动隐藏淡出后的不透明度。5% 一档，0.05…0.95。
+    /// 读写都做 clamp：手改 plist 写入 0 会让浮窗彻底看不见，属于必须防的情况。
+    static let minAutoHideOpacity: CGFloat = 0.05
+    static let maxAutoHideOpacity: CGFloat = 0.95
+    static let defaultAutoHideOpacity: CGFloat = 0.35
+    /// 供设置页 / 右键菜单 / 状态栏子菜单复用的档位表
+    static let autoHideOpacitySteps: [CGFloat] = (1...19).map { CGFloat($0) * 0.05 }
+
+    var autoHideOpacity: CGFloat {
+        get { Self.clampOpacity(CGFloat(d.double(forKey: K.autoHideOpacity))) }
+        set { d.set(Double(Self.clampOpacity(newValue)), forKey: K.autoHideOpacity) }
+    }
+
+    static func clampOpacity(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite, value > 0 else { return defaultAutoHideOpacity }
+        return min(max(value, minAutoHideOpacity), maxAutoHideOpacity)
+    }
+
+    /// 把任意透明度对齐到最近的 5% 档位，便于菜单勾选比对
+    static func nearestOpacityStep(_ value: CGFloat) -> CGFloat {
+        let clamped = clampOpacity(value)
+        return autoHideOpacitySteps.min { abs($0 - clamped) < abs($1 - clamped) } ?? defaultAutoHideOpacity
+    }
+
+    static func opacityLabel(_ value: CGFloat) -> String {
+        "\(Int((value * 100).rounded()))%"
     }
 
     var idleDetectionDefault: Bool {

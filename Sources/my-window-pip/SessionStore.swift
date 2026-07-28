@@ -156,6 +156,12 @@ final class SessionStore {
         sessions.forEach { $0.setLevelMode(mode) }
     }
 
+    /// 设置页改了全局「自动隐藏透明度」：写入偏好并让正处于淡出态的浮窗立即生效。
+    func applyAutoHideOpacity(_ opacity: CGFloat) {
+        Preferences.shared.autoHideOpacity = opacity
+        sessions.forEach { $0.refreshAutoHideOpacity() }
+    }
+
     /// 增强模式的悬停按键路由
     func handleHoverKey(_ key: EventTapManager.HoverKey, sessionID: UUID) {
         session(id: sessionID)?.applyHoverKey(key)

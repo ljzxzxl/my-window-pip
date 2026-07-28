@@ -7,6 +7,11 @@ import AppKit
 ///   让事件穿到下层内容视图，从而保留浮窗拖动、滚轮平移等手势。
 /// - 显示/隐藏统一走 `setVisible(_:animated:)`；淡出结束后置 `isHidden = true`，彻底不拦截鼠标。
 /// - 本视图只发信号（闭包回调），不持有会话、不改状态；状态一律由 `update(state:)` 单向灌入。
+///
+/// 提示语约定（v0.1.1）：**不再使用系统 tooltip**。浮窗 level 是 `.screenSaver`(1000)，
+/// 系统 tooltip 是独立窗口且层级更低，会被压在浮窗后面只露出一小部分，初始延迟也无公开 API 可调。
+/// 因此这里只负责「鼠标进入了哪个控件、该显示什么文案」，经 `onHintChange` 零延迟上抛，
+/// 由 `PiPWindowController` 在浮窗自己的视图树里画提示条。无障碍标签（`setAccessibilityLabel`）全部保留。
 final class OverlayControlsView: NSView {
 
     // MARK: - 对外回调
@@ -24,14 +29,18 @@ final class OverlayControlsView: NSView {
     /// 暂停 / 继续
     var onTogglePause: (() -> Void)?
 
+    /// 鼠标进入某个控件时**立即**（零延迟）上抛 `(提示文案, 该控件在控制条自身坐标系内的 frame)`；
+    /// 鼠标离开、或控制条整体隐藏时上抛 nil。
+    var onHintChange: (((String, CGRect)?) -> Void)?
+
     // MARK: - 对外状态
 
     /// 左侧标题，形如 `Terminal · npm run build`。单行、尾部省略。
+    /// 标题被截断时的完整内容改由提示条呈现（悬停标题区域即显示），不再依赖系统 tooltip。
     var titleText: String = "" {
         didSet {
             guard titleText != oldValue else { return }
             titleLabel.stringValue = titleText
-            titleLabel.toolTip = titleText.isEmpty ? nil : titleText
             needsLayout = true
         }
     }
@@ -88,6 +97,23 @@ final class OverlayControlsView: NSView {
     /// `setVisible` 的目标态，避免淡出回调把刚重新显示的控制条又藏起来
     private var desiredVisible = false
 
+    // MARK: - 提示条（替代系统 tooltip）
+
+    /// 可触发提示的控件。数量固定，用 Int 原始值放进 tracking area 的 userInfo，
+    /// 避免 userInfo 直接持有视图形成「视图 → tracking area → userInfo → 视图」的循环引用。
+    private enum HintTarget: Int, CaseIterable {
+        case pause, fps, resetZoom, autoHide, idle, close, title
+    }
+
+    private static let hintTargetKey = "hintTarget"
+
+    /// 按钮 → 当前提示文案（含开关态）。键为 `ObjectIdentifier(按钮)`。
+    private var hintTexts: [ObjectIdentifier: String] = [:]
+    /// 各目标当前挂着的 tracking area（挂在目标视图自己身上，owner 是本视图）
+    private var hintTrackingAreas: [HintTarget: NSTrackingArea] = [:]
+    /// 鼠标当前所在的目标。相邻按钮之间移动时 enter/exit 的先后顺序并不保证，用它去重。
+    private var activeHintTarget: HintTarget?
+
     // MARK: - 初始化
 
     override init(frame frameRect: NSRect) {
@@ -136,14 +162,13 @@ final class OverlayControlsView: NSView {
         zoomLabel.textColor = Self.activeTint
         zoomLabel.usesSingleLineMode = true
         zoomLabel.isHidden = true
-        zoomLabel.toolTip = L.t("当前放大倍率", "Current zoom factor")
         addSubview(zoomLabel)
     }
 
     private func setupButtons() {
         configureIconButton(
             pauseButton, symbols: ["pause.fill"],
-            tooltip: L.t("暂停", "Pause"),
+            hint: L.t("暂停", "Pause"),
             accessibility: L.t("暂停", "Pause"),
             action: #selector(handleTogglePause)
         )
@@ -155,14 +180,14 @@ final class OverlayControlsView: NSView {
         fpsButton.target = self
         fpsButton.action = #selector(handleCycleFPS)
         fpsButton.refusesFirstResponder = true
-        fpsButton.toolTip = L.t("切换帧率", "Cycle frame rate")
+        setHintText(L.t("切换帧率", "Cycle frame rate"), for: fpsButton)
         fpsButton.setAccessibilityLabel(L.t("切换帧率", "Cycle frame rate"))
         addSubview(fpsButton)
         setFPSTitle("15f", color: Self.inactiveTint)
 
         configureIconButton(
             resetZoomButton, symbols: ["arrow.up.left.and.down.right.magnifyingglass"],
-            tooltip: L.t("复位缩放", "Reset zoom"),
+            hint: L.t("复位缩放", "Reset zoom"),
             accessibility: L.t("复位缩放", "Reset zoom"),
             action: #selector(handleResetZoom)
         )
@@ -171,21 +196,21 @@ final class OverlayControlsView: NSView {
 
         configureIconButton(
             autoHideButton, symbols: ["eye"],
-            tooltip: L.t("自动隐藏（鼠标移入时淡出）", "Auto-hide (fade out on hover)"),
+            hint: L.t("自动隐藏（鼠标移入时淡出）", "Auto-hide (fade out on hover)"),
             accessibility: L.t("自动隐藏", "Auto-hide"),
             action: #selector(handleToggleAutoHide)
         )
 
         configureIconButton(
             idleButton, symbols: ["bolt.badge.clock", "zzz"],
-            tooltip: L.t("静止检测（画面不变时自动降帧）", "Idle detection (drop frame rate when static)"),
+            hint: L.t("静止检测（画面不变时自动降帧）", "Idle detection (drop frame rate when static)"),
             accessibility: L.t("静止检测", "Idle detection"),
             action: #selector(handleToggleIdleDetection)
         )
 
         configureIconButton(
             closeButton, symbols: ["xmark"],
-            tooltip: L.t("关闭浮窗", "Close picture-in-picture"),
+            hint: L.t("关闭浮窗", "Close picture-in-picture"),
             accessibility: L.t("关闭浮窗", "Close picture-in-picture"),
             action: #selector(handleClose)
         )
@@ -196,9 +221,10 @@ final class OverlayControlsView: NSView {
         setAccessibilityLabel(L.t("浮窗控制条", "Overlay controls"))
     }
 
-    /// 统一配置图标按钮：无边框、模板着色、20×20、带 toolTip 与无障碍标签。
+    /// 统一配置图标按钮：无边框、模板着色、20×20、带提示文案与无障碍标签。
+    /// 刻意不设 `toolTip`——系统 tooltip 会被浮窗层级压住，提示改由 `onHintChange` 上抛后自绘。
     private func configureIconButton(_ button: NSButton, symbols: [String],
-                                     tooltip: String, accessibility: String,
+                                     hint: String, accessibility: String,
                                      action: Selector) {
         button.isBordered = false
         button.setButtonType(.momentaryChange)
@@ -209,7 +235,7 @@ final class OverlayControlsView: NSView {
         button.target = self
         button.action = action
         button.refusesFirstResponder = true
-        button.toolTip = tooltip
+        setHintText(hint, for: button)
         button.setAccessibilityLabel(accessibility)
         addSubview(button)
     }
@@ -258,6 +284,10 @@ final class OverlayControlsView: NSView {
                 width: zoomWidth, height: h
             )
         }
+
+        // 按钮 frame 变了：tracking area 与已上抛的锚点 frame 都要跟着刷新
+        rebuildHintTrackingAreas()
+        if let target = activeHintTarget { pushHint(for: target) }
     }
 
     private func verticalCenter(of height: CGFloat) -> CGFloat {
@@ -276,8 +306,8 @@ final class OverlayControlsView: NSView {
     func update(state: PiPSessionState) {
         // 帧率
         setFPSTitle("\(state.fps.rawValue)f", color: Self.inactiveTint)
-        fpsButton.toolTip = L.t("帧率 \(state.fps.rawValue) fps，点按切换下一档",
-                                "\(state.fps.rawValue) fps — click to cycle")
+        setHintText(L.t("帧率 \(state.fps.rawValue) fps，点按切换下一档",
+                        "\(state.fps.rawValue) fps — click to cycle"), for: fpsButton)
         fpsButton.setAccessibilityLabel(L.t("帧率 \(state.fps.rawValue) 帧每秒",
                                             "Frame rate \(state.fps.rawValue) fps"))
 
@@ -287,7 +317,7 @@ final class OverlayControlsView: NSView {
             accessibility: state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause")
         )
         pauseButton.contentTintColor = state.isPaused ? Self.activeTint : Self.inactiveTint
-        pauseButton.toolTip = state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause")
+        setHintText(state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause"), for: pauseButton)
         pauseButton.setAccessibilityLabel(state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause"))
 
         // 复位缩放：仅放大状态可用
@@ -302,8 +332,8 @@ final class OverlayControlsView: NSView {
         )
         applyToggleStyle(
             autoHideButton, isOn: state.autoHide,
-            onTooltip: L.t("自动隐藏：开（鼠标移入时淡出）", "Auto-hide: on (fades out on hover)"),
-            offTooltip: L.t("自动隐藏：关", "Auto-hide: off"),
+            onHint: L.t("自动隐藏：开（鼠标移入时淡出）", "Auto-hide: on (fades out on hover)"),
+            offHint: L.t("自动隐藏：关", "Auto-hide: off"),
             onLabel: L.t("自动隐藏：开", "Auto-hide: on"),
             offLabel: L.t("自动隐藏：关", "Auto-hide: off")
         )
@@ -311,9 +341,9 @@ final class OverlayControlsView: NSView {
         // 静止检测
         applyToggleStyle(
             idleButton, isOn: state.idleDetection,
-            onTooltip: L.t("静止检测：开（画面不变时自动降到 1 fps）",
-                           "Idle detection: on (drops to 1 fps when static)"),
-            offTooltip: L.t("静止检测：关", "Idle detection: off"),
+            onHint: L.t("静止检测：开（画面不变时自动降到 1 fps）",
+                        "Idle detection: on (drops to 1 fps when static)"),
+            offHint: L.t("静止检测：关", "Idle detection: off"),
             onLabel: L.t("静止检测：开", "Idle detection: on"),
             offLabel: L.t("静止检测：关", "Idle detection: off")
         )
@@ -327,14 +357,17 @@ final class OverlayControlsView: NSView {
             zoomLabel.isHidden = true
         }
 
+        // 文案随开关态变了：鼠标正停在该控件上时立即刷新提示，不必移开再移回
+        if let target = activeHintTarget { pushHint(for: target) }
+
         needsLayout = true
     }
 
     private func applyToggleStyle(_ button: NSButton, isOn: Bool,
-                                  onTooltip: String, offTooltip: String,
+                                  onHint: String, offHint: String,
                                   onLabel: String, offLabel: String) {
         button.contentTintColor = isOn ? Self.activeTint : Self.inactiveTint
-        button.toolTip = isOn ? onTooltip : offTooltip
+        setHintText(isOn ? onHint : offHint, for: button)
         button.setAccessibilityLabel(isOn ? onLabel : offLabel)
     }
 
@@ -354,6 +387,8 @@ final class OverlayControlsView: NSView {
     func setVisible(_ visible: Bool, animated: Bool) {
         desiredVisible = visible
         if visible { isHidden = false }
+        // 控制条要走了，提示条不能留在画面上
+        if !visible { clearHint() }
 
         guard animated else {
             alphaValue = visible ? 1 : 0
@@ -369,6 +404,93 @@ final class OverlayControlsView: NSView {
             guard let self, !visible, !self.desiredVisible else { return }
             self.isHidden = true
         })
+    }
+
+    // MARK: - 即时提示（tracking area → onHintChange）
+
+    /// 记录某个按钮当前的提示文案。
+    private func setHintText(_ text: String, for button: NSButton) {
+        hintTexts[ObjectIdentifier(button)] = text
+    }
+
+    private func hintTargetView(_ target: HintTarget) -> NSView {
+        switch target {
+        case .pause: return pauseButton
+        case .fps: return fpsButton
+        case .resetZoom: return resetZoomButton
+        case .autoHide: return autoHideButton
+        case .idle: return idleButton
+        case .close: return closeButton
+        case .title: return titleLabel
+        }
+    }
+
+    private func hintText(for target: HintTarget) -> String? {
+        if target == .title { return titleText.isEmpty ? nil : titleText }
+        let text = hintTexts[ObjectIdentifier(hintTargetView(target))]
+        return (text?.isEmpty ?? true) ? nil : text
+    }
+
+    /// tracking area 挂在各目标视图自己身上（owner 仍是本视图），`.inVisibleRect` 让系统按目标的
+    /// 可见区域自动维护矩形；但 `layout()` 之后按钮 frame 会整体平移，这里仍统一重建以防错位。
+    private func rebuildHintTrackingAreas() {
+        for (target, area) in hintTrackingAreas {
+            hintTargetView(target).removeTrackingArea(area)
+        }
+        hintTrackingAreas.removeAll(keepingCapacity: true)
+
+        for target in HintTarget.allCases {
+            let view = hintTargetView(target)
+            guard !view.isHidden, hintText(for: target) != nil else { continue }
+            let area = NSTrackingArea(
+                rect: view.bounds,
+                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: [Self.hintTargetKey: target.rawValue]
+            )
+            view.addTrackingArea(area)
+            hintTrackingAreas[target] = area
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        rebuildHintTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard let target = Self.hintTarget(of: event) else {
+            super.mouseEntered(with: event)
+            return
+        }
+        activeHintTarget = target
+        pushHint(for: target)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard let target = Self.hintTarget(of: event) else {
+            super.mouseExited(with: event)
+            return
+        }
+        // 相邻按钮间移动时可能先收到新目标的 entered：只有离开的仍是当前目标才真的清除
+        guard activeHintTarget == target else { return }
+        clearHint()
+    }
+
+    /// 零延迟上抛：文案 + 该控件在**控制条自身坐标系**内的 frame（按钮/标题都是本视图的直接子视图）。
+    private func pushHint(for target: HintTarget) {
+        guard desiredVisible, !isHidden, let text = hintText(for: target) else { return }
+        onHintChange?((text, hintTargetView(target).frame))
+    }
+
+    private func clearHint() {
+        activeHintTarget = nil
+        onHintChange?(nil)
+    }
+
+    private static func hintTarget(of event: NSEvent) -> HintTarget? {
+        guard let raw = event.trackingArea?.userInfo?[hintTargetKey] as? Int else { return nil }
+        return HintTarget(rawValue: raw)
     }
 
     // MARK: - 命中测试（保住浮窗拖动）

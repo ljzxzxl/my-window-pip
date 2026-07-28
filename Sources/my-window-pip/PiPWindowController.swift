@@ -60,6 +60,70 @@ private final class PiPRootView: NSView {
     }
 }
 
+// MARK: - 浮窗内提示条
+
+/// 画在浮窗自己视图树里的提示条（替代系统 tooltip）。
+///
+/// 为什么不用系统 tooltip：浮窗 level 为 `.screenSaver`(1000)，而系统 tooltip 是层级更低的独立窗口，
+/// 会被压在浮窗后面只露出窗外的一小截；它的初始延迟也由 `NSToolTipManager` 私有控制，无法调整。
+/// 自绘的提示条与浮窗同属一个窗口，既没有层级问题，出现时机也完全自主。
+private final class HintLabel: NSView {
+    /// 圆角
+    private static let cornerRadius: CGFloat = 6
+    /// 文字左右 / 上下内边距
+    private static let hInset: CGFloat = 7
+    private static let vInset: CGFloat = 4
+    private static let font = NSFont.systemFont(ofSize: 11)
+
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = Self.cornerRadius
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.82).cgColor
+        alphaValue = 0
+        isHidden = true
+
+        label.font = Self.font
+        label.textColor = .white
+        label.alignment = .left
+        label.usesSingleLineMode = true
+        label.lineBreakMode = .byTruncatingTail
+        label.cell?.truncatesLastVisibleLine = true
+        label.drawsBackground = false
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("HintLabel 仅支持代码创建（本项目无 xib/storyboard）")
+    }
+
+    var text: String = "" {
+        didSet {
+            guard text != oldValue else { return }
+            label.stringValue = text
+            needsLayout = true
+        }
+    }
+
+    /// 单行渲染所需尺寸；超过 `maxWidth` 时按 `maxWidth` 收口，文字交给尾部截断处理。
+    static func preferredSize(for text: String, maxWidth: CGFloat) -> CGSize {
+        let measured = (text as NSString).size(withAttributes: [.font: font])
+        let width = min(ceil(measured.width) + hInset * 2, max(0, maxWidth))
+        return CGSize(width: width, height: ceil(measured.height) + vInset * 2)
+    }
+
+    override func layout() {
+        super.layout()
+        label.frame = bounds.insetBy(dx: Self.hInset, dy: Self.vInset)
+    }
+
+    /// 绝不参与命中测试：浮窗拖动、滚轮缩放平移、双击复位等手势必须原样落到下层内容视图。
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 // MARK: - 浮窗控制器
 
 /// 单个 PiP 浮窗的控制器：负责 NSPanel 的创建、层级、宽高比锁定、位置校正、
@@ -78,6 +142,14 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private static let resizeDebounceInterval: TimeInterval = 0.25
     /// alpha 动画时长（§4.10）
     private static let alphaAnimationDuration: TimeInterval = 0.12
+    /// 提示条与控制条之间的垂直间隙
+    private static let hintGap: CGFloat = 4
+    /// 提示条相对内容区的安全内缩（clamp 用）
+    private static let hintEdgeInset: CGFloat = 6
+    private static let hintFadeInDuration: TimeInterval = 0.08
+    private static let hintFadeOutDuration: TimeInterval = 0.12
+    /// 低于该不透明度视为「自动隐藏淡出态」，此时不打扰用户
+    private static let hintMinWindowAlpha: CGFloat = 0.99
 
     // MARK: - 对外
 
@@ -108,6 +180,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private let contentView = PiPContentView(frame: .zero)
     private let placeholder = PlaceholderView(frame: .zero)
     private let overlay = OverlayControlsView(frame: .zero)
+    private let hint = HintLabel(frame: .zero)
 
     private(set) var aspect: CGSize
     private var titleText: String
@@ -119,6 +192,17 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private var lastReportedScale: CGFloat = 0
     private var screenObserver: NSObjectProtocol?
 
+    // 提示条状态
+    /// 当前提示文案（nil = 未显示）
+    private var hintText: String?
+    /// 触发按钮在**控制条自身坐标系**内的 frame；nil 表示用默认位置（控制条正下方、右对齐）
+    private var hintAnchor: CGRect?
+    /// `duration` 到点自动淡出的定时器，重复调用 `showHint` 会打断它
+    private var hintDismissWork: DispatchWorkItem?
+    /// 最近一次 `setAlpha` 的目标值。淡出动画进行中读 `panel.alphaValue` 拿到的是中间值，
+    /// 会误把「刚恢复不透明 + 立刻提示」判成淡出态，所以用目标值判定。
+    private var alphaTarget: CGFloat = 1
+
     // 右键菜单
     private let contextMenu = NSMenu()
     private let titleItem = NSMenuItem()
@@ -128,6 +212,8 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private let idleItem = NSMenuItem()
     private var fpsItems: [FPSStep: NSMenuItem] = [:]
     private var levelItems: [WindowLevelMode: NSMenuItem] = [:]
+    /// 自动隐藏透明度档位项（下标与 `Preferences.autoHideOpacitySteps` 一一对应）
+    private var opacityItems: [NSMenuItem] = []
 
     // MARK: - 初始化
 
@@ -165,6 +251,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         resizeDebounce?.cancel()
+        hintDismissWork?.cancel()
     }
 
     /// 多浮窗错位：每多一个浮窗向左上偏移 32pt。
@@ -239,6 +326,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         overlay.frame = Self.overlayFrame(in: root.bounds)
         root.addSubview(overlay)
 
+        // 提示条压在控制条之上（位置每次显示时按锚点重算，不用 autoresizing）
+        root.addSubview(hint, positioned: .above, relativeTo: overlay)
+
         placeholder.setVisible(false, animated: false)
         overlay.setVisible(false, animated: false)
 
@@ -266,6 +356,16 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         overlay.onToggleAutoHide = { [weak self] in self?.delegate?.pipRequestToggleAutoHide() }
         overlay.onToggleIdleDetection = { [weak self] in self?.delegate?.pipRequestToggleIdleDetection() }
         overlay.onTogglePause = { [weak self] in self?.delegate?.pipRequestTogglePause() }
+
+        // 控制条只上报「悬停了谁、该说什么」，提示条的定位与动画都在本控制器里
+        overlay.onHintChange = { [weak self] payload in
+            guard let self else { return }
+            guard let payload else {
+                self.showHint(nil, near: nil)
+                return
+            }
+            self.showHint(payload.0, near: payload.1)
+        }
 
         contentView.update(aspect: aspect)
     }
@@ -301,6 +401,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     func close() {
         resizeDebounce?.cancel()
         resizeDebounce = nil
+        hintDismissWork?.cancel()
+        hintDismissWork = nil
+        hideHint(animated: false)
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
             self.screenObserver = nil
@@ -309,6 +412,99 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         panel.delegate = nil
         panel.orderOut(nil)
         panel.close()          // isReleasedWhenClosed = false，安全
+    }
+
+    // MARK: - 浮窗内提示条
+
+    /// 在浮窗内显示提示条（不用系统 tooltip，避免被浮窗层级遮挡）。
+    ///
+    /// - Parameters:
+    ///   - text: nil / 空串表示立即隐藏提示
+    ///   - anchorInOverlay: 触发按钮在**控制条自身坐标系**内的 frame；nil 表示用默认位置
+    ///     （控制条正下方、右对齐到控制条右边缘）
+    ///   - duration: nil 表示常驻直到再次调用；否则到点自动淡出
+    func showHint(_ text: String?, near anchorInOverlay: CGRect?, duration: TimeInterval? = nil) {
+        // 无论如何都先掐掉上一条的自动淡出定时器，避免旧定时器把新提示带走
+        hintDismissWork?.cancel()
+        hintDismissWork = nil
+
+        guard let text, !text.isEmpty else {
+            hideHint(animated: true)
+            return
+        }
+        // 淡出态（自动隐藏中）或窗口没显示时不打扰：此时提示条本身也几乎看不清
+        guard panel.isVisible, alphaTarget > Self.hintMinWindowAlpha else {
+            hideHint(animated: false)
+            return
+        }
+
+        // 已经完全显示时只换文案与位置，不再重跑淡入（控制条每次 layout 都会重发当前提示）
+        let wasFullyVisible = !hint.isHidden && hint.alphaValue > 0.999
+        hintText = text
+        hintAnchor = anchorInOverlay
+        hint.text = text
+        hint.isHidden = false
+        layoutHint()
+        if !wasFullyVisible { fadeHint(to: 1, duration: Self.hintFadeInDuration) }
+
+        guard let duration, duration > 0 else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.hintDismissWork = nil
+            self?.hideHint(animated: true)
+        }
+        hintDismissWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+    }
+
+    private func hideHint(animated: Bool) {
+        hintDismissWork?.cancel()
+        hintDismissWork = nil
+        hintText = nil
+        hintAnchor = nil
+
+        guard animated, !hint.isHidden, hint.alphaValue > 0 else {
+            hint.alphaValue = 0
+            hint.isHidden = true
+            return
+        }
+        fadeHint(to: 0, duration: Self.hintFadeOutDuration) { [weak self] in
+            // 淡出期间又来了新提示（hintText 非 nil）就别再藏
+            guard let self, self.hintText == nil else { return }
+            self.hint.isHidden = true
+        }
+    }
+
+    /// 淡入 80ms / 淡出 120ms。新的动画会直接接管进行中的旧动画。
+    private func fadeHint(to alpha: CGFloat, duration: TimeInterval,
+                          completion: (() -> Void)? = nil) {
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            self.hint.animator().alphaValue = alpha
+        }, completionHandler: completion)
+    }
+
+    /// 定位策略：紧贴控制条下方 `hintGap`，右边缘对齐到锚点右边缘（换算到 root 坐标系），
+    /// 整体 clamp 在 root 内缩 `hintEdgeInset` 的范围内；窗口很窄时宽度先 clamp，文字交给尾部截断。
+    private func layoutHint() {
+        guard let text = hintText, !text.isEmpty else { return }
+        let available = root.bounds.insetBy(dx: Self.hintEdgeInset, dy: Self.hintEdgeInset)
+        guard available.width > 1, available.height > 1 else {
+            hint.frame = .zero
+            return
+        }
+
+        let size = HintLabel.preferredSize(for: text, maxWidth: available.width)
+        let bar = Self.overlayFrame(in: root.bounds)
+        // 锚点在控制条坐标系内，控制条是 root 的直接子视图，加上它的原点即为 root 坐标
+        let anchorRight = hintAnchor.map { bar.minX + $0.maxX } ?? bar.maxX
+
+        var x = anchorRight - size.width
+        x = min(max(x, available.minX), max(available.minX, available.maxX - size.width))
+        var y = bar.minY - Self.hintGap - size.height
+        y = min(max(y, available.minY), max(available.minY, available.maxY - size.height))
+
+        hint.frame = CGRect(x: x.rounded(), y: y.rounded(), width: size.width, height: size.height)
     }
 
     // MARK: - 帧渲染
@@ -391,6 +587,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
     func setAlpha(_ alpha: CGFloat, animated: Bool) {
         let target = min(max(alpha, 0), 1)
+        alphaTarget = target
+        // 进入淡出态时提示条一起收掉（此时它本身也看不清，留着只会挡画面）
+        if target <= Self.hintMinWindowAlpha { hideHint(animated: false) }
         guard animated else {
             panel.alphaValue = target
             return
@@ -412,12 +611,14 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     func hideCompletely() {
         resizeDebounce?.cancel()
         resizeDebounce = nil
+        hideHint(animated: false)
         contentView.flushAndReset()
         panel.orderOut(nil)
     }
 
     func restoreFromHidden() {
         panel.alphaValue = 1
+        alphaTarget = 1
         panel.ignoresMouseEvents = false
         panel.orderFrontRegardless()
         _ = panel.makeFirstResponder(contentView)
@@ -436,6 +637,8 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     // MARK: - NSWindowDelegate
 
     func windowDidResize(_ notification: Notification) {
+        // 窗口尺寸变了：提示条要按新的内容区重新 clamp（控制条自己走 autoresizing）
+        layoutHint()
         scheduleResizeNotify()
     }
 
@@ -529,6 +732,28 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         autoHideItem.action = #selector(menuToggleAutoHide)
         contextMenu.addItem(autoHideItem)
 
+        // 自动隐藏透明度：5% 一档，作用域是全局偏好（标题里已标注「全局」）
+        let opacityItem = NSMenuItem(title: L.t("自动隐藏透明度（全局）", "Auto-hide opacity (global)"),
+                                     action: nil, keyEquivalent: "")
+        let opacityMenu = NSMenu()
+        opacityMenu.autoenablesItems = false
+        for (index, step) in Preferences.autoHideOpacitySteps.enumerated() {
+            let item = NSMenuItem(title: Preferences.opacityLabel(step),
+                                  action: #selector(menuPickAutoHideOpacity(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            opacityMenu.addItem(item)
+            opacityItems.append(item)
+        }
+        opacityMenu.addItem(.separator())
+        // 逃生通道说明：淡出后浮窗是点击穿透的，按住 ⌥ 才能临时唤回来操作
+        let peekNote = NSMenuItem(title: L.t("淡出后按住 ⌥ 可临时唤回浮窗", "Hold ⌥ to peek while faded"),
+                                  action: nil, keyEquivalent: "")
+        peekNote.isEnabled = false
+        opacityMenu.addItem(peekNote)
+        opacityItem.submenu = opacityMenu
+        contextMenu.addItem(opacityItem)
+
         idleItem.title = L.t("静止检测（画面不变时降帧）", "Idle detection (drop FPS when static)")
         idleItem.target = self
         idleItem.action = #selector(menuToggleIdleDetection)
@@ -578,6 +803,13 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         autoHideItem.state = (state?.autoHide ?? false) ? .on : .off
         idleItem.state = (state?.idleDetection ?? true) ? .on : .off
 
+        // 透明度勾选：把当前偏好对齐到最近的 5% 档位再比对
+        let opacity = Preferences.nearestOpacityStep(Preferences.shared.autoHideOpacity)
+        for (index, item) in opacityItems.enumerated() {
+            let step = Preferences.autoHideOpacitySteps[index]
+            item.state = abs(step - opacity) < 0.001 ? .on : .off
+        }
+
         let fps = state?.fps ?? Preferences.shared.defaultFPS
         for (step, item) in fpsItems { item.state = (step == fps) ? .on : .off }
         for (mode, item) in levelItems { item.state = (mode == levelMode) ? .on : .off }
@@ -609,6 +841,12 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
     @objc private func menuToggleAutoHide() {
         delegate?.pipRequestToggleAutoHide()
+    }
+
+    /// 透明度是全局偏好，写入与「对已淡出浮窗立即生效」都由会话层负责
+    @objc private func menuPickAutoHideOpacity(_ sender: NSMenuItem) {
+        guard Preferences.autoHideOpacitySteps.indices.contains(sender.tag) else { return }
+        delegate?.pipRequestAutoHideOpacity(Preferences.autoHideOpacitySteps[sender.tag])
     }
 
     @objc private func menuToggleIdleDetection() {
