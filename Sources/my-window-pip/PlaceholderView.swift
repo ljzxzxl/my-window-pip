@@ -207,10 +207,8 @@ final class PlaceholderView: NSView {
         iconView.contentTintColor = content.isAlert ? .systemOrange : .labelColor
 
         titleLabel.stringValue = content.title
-        titleLabel.toolTip = content.title.isEmpty ? nil : content.title
 
         subtitleLabel.stringValue = content.subtitle
-        subtitleLabel.toolTip = content.subtitle.isEmpty ? nil : content.subtitle
         wantsSubtitle = !content.subtitle.isEmpty
 
         // 操作按钮：仅当外部注入了回调时才出现，避免点了没反应
