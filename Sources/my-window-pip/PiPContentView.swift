@@ -23,6 +23,10 @@ final class PiPContentView: NSView {
     var onRequestCycleFPS: (() -> Void)?
     var onRequestToggleIdleDetection: (() -> Void)?
     var onRequestTogglePause: (() -> Void)?
+    /// 手动拖动窗口结束（本次按下确实移动过窗口）：上层据此持久化位置、处理跨屏 scale 变化
+    var onDidDragWindow: (() -> Void)?
+    /// 干净的单击（未拖动、`clickCount == 1`、无 Cmd/⌥/⌃/⇧）：请求切回源应用
+    var onRequestActivateSource: (() -> Void)?
 
     // MARK: - 渲染
 
@@ -42,6 +46,19 @@ final class PiPContentView: NSView {
 
     private var selectionStart: CGPoint?
     private var isSelecting = false
+
+    // MARK: - 手动拖窗 / 单击判定
+
+    /// 按下时的鼠标屏幕位置。位移一律按「当前 - 起点」的累计差值算，不用逐次增量，避免抖动。
+    private var dragStartMouseInScreen: CGPoint?
+    /// 按下时的窗口原点（屏幕坐标）
+    private var dragStartWindowOrigin: CGPoint?
+    /// 本次按下是否已判定为拖动
+    private var didDrag = false
+    /// 判定为拖动的最小位移（点）
+    private static let dragThreshold: CGFloat = 3
+    /// 会阻止「单击回源」的修饰键：带这些键的点击属于其它手势
+    private static let activateBlockingFlags: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
 
     // MARK: - 60Hz 节流合并
 
@@ -149,6 +166,7 @@ final class PiPContentView: NSView {
     func flushAndReset() {
         displayLayer.flushAndRemoveImage()
         cancelSelection()
+        resetDragTracking()
         pendingPan = .zero
         pendingZoom = nil
         didLogRenderFailure = false
@@ -161,24 +179,26 @@ final class PiPContentView: NSView {
     /// 浮窗是 nonactivating 的，未获得 key 状态时也要能直接响应第一次点击。
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// 关闭系统的「背景拖动」自动接管，改由本视图判定：
-    /// 带 Cmd → 框选；不带 Cmd → 主动调用 `performDrag` 拖窗口。
-    /// 否则 AppKit 会在 mouseDown 之前吞掉事件，Cmd 框选将收不到。
+    /// 关闭系统的「背景拖动」自动接管（窗口侧 `isMovableByWindowBackground` 也已置为 false）：
+    /// 带 Cmd → 框选；不带 Cmd → 本视图自己算位移移动窗口。
+    /// 系统背景拖动会在 mouseDown 前吞掉事件序列，既收不到 Cmd 框选，也拿不到干净的 mouseUp（单击回源要用）。
     override var mouseDownCanMoveWindow: Bool { false }
 
-    // MARK: - 鼠标：框选 / 拖动 / 复位
+    // MARK: - 鼠标：框选 / 拖动 / 单击回源 / 复位
 
     override func mouseDown(with event: NSEvent) {
         let isCommand = event.modifierFlags.contains(.command)
 
-        // Cmd + 双击 → 复位缩放
+        // Cmd + 双击 → 复位缩放（优先级最高，与改造前一致）
         if isCommand && event.clickCount >= 2 {
             cancelSelection()
+            resetDragTracking()
             onRequestZoomReset?()
             return
         }
 
         if isCommand {
+            resetDragTracking()
             selectionStart = convert(event.locationInWindow, from: nil)
             isSelecting = true
             selectionLayer.path = nil
@@ -186,35 +206,81 @@ final class PiPContentView: NSView {
             return
         }
 
-        // 无 Cmd：交给窗口拖动（窗口已开启 isMovableByWindowBackground）
+        // 无 Cmd：开始跟踪「拖动 or 单击」，具体由 mouseDragged / mouseUp 判定
         cancelSelection()
-        window?.performDrag(with: event)
+        didDrag = false
+        dragStartMouseInScreen = window?.convertPoint(toScreen: event.locationInWindow)
+        dragStartWindowOrigin = window?.frame.origin
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard isSelecting, let start = selectionStart else {
+        if isSelecting, let start = selectionStart {
+            let current = convert(event.locationInWindow, from: nil)
+            selectionLayer.path = CGPath(rect: Self.rect(from: start, to: current), transform: nil)
+            return
+        }
+
+        guard let window,
+              let startMouse = dragStartMouseInScreen,
+              let startOrigin = dragStartWindowOrigin else {
             super.mouseDragged(with: event)
             return
         }
-        let current = convert(event.locationInWindow, from: nil)
-        selectionLayer.path = CGPath(rect: Self.rect(from: start, to: current), transform: nil)
+
+        // locationInWindow 是事件发生时相对窗口的坐标，转屏幕后即为真实全局位置：
+        // 即使窗口已在本次拖动中移动过，用「起点 → 当前」的累计差值也不会漂移。
+        let current = window.convertPoint(toScreen: event.locationInWindow)
+        let dx = current.x - startMouse.x
+        let dy = current.y - startMouse.y
+        if !didDrag {
+            guard hypot(dx, dy) > Self.dragThreshold else { return }
+            didDrag = true
+        }
+
+        var frame = window.frame
+        frame.origin = CGPoint(x: (startOrigin.x + dx).rounded(), y: (startOrigin.y + dy).rounded())
+        // 安全网：只有整窗跑到所有屏幕可见区域之外时才会被拉回，正常拖动（含跨屏）不受影响
+        window.setFrameOrigin(Geo.constrainToVisibleScreens(frame).origin)
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard isSelecting, let start = selectionStart else {
+        if isSelecting, let start = selectionStart {
+            let selection = Self.rect(from: start, to: convert(event.locationInWindow, from: nil))
+            cancelSelection()
+
+            guard let result = Geo.zoomAndAnchor(forSelection: selection, aspect: aspect, bounds: bounds,
+                                                 currentZoom: zoom, currentAnchor: anchor) else { return }
+            // 本地先行更新，避免连续操作时用到过期的 zoom/anchor
+            zoom = result.0
+            anchor = result.1
+            pendingZoom = nil
+            onRequestZoom?(result.0, result.1)
+            return
+        }
+
+        let wasTracking = dragStartMouseInScreen != nil
+        let dragged = didDrag
+        resetDragTracking()
+
+        guard wasTracking else {
             super.mouseUp(with: event)
             return
         }
-        let selection = Self.rect(from: start, to: convert(event.locationInWindow, from: nil))
-        cancelSelection()
+        if dragged {
+            onDidDragWindow?()
+            return
+        }
 
-        guard let result = Geo.zoomAndAnchor(forSelection: selection, aspect: aspect, bounds: bounds,
-                                             currentZoom: zoom, currentAnchor: anchor) else { return }
-        // 本地先行更新，避免连续操作时用到过期的 zoom/anchor
-        zoom = result.0
-        anchor = result.1
-        pendingZoom = nil
-        onRequestZoom?(result.0, result.1)
+        // 干净的单击才回源：双击 / 带修饰键的点击都留给其它手势
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard event.clickCount == 1, flags.isDisjoint(with: Self.activateBlockingFlags) else { return }
+        onRequestActivateSource?()
+    }
+
+    private func resetDragTracking() {
+        didDrag = false
+        dragStartMouseInScreen = nil
+        dragStartWindowOrigin = nil
     }
 
     private func cancelSelection() {

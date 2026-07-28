@@ -8,10 +8,11 @@ import AppKit
 /// - 显示/隐藏统一走 `setVisible(_:animated:)`；淡出结束后置 `isHidden = true`，彻底不拦截鼠标。
 /// - 本视图只发信号（闭包回调），不持有会话、不改状态；状态一律由 `update(state:)` 单向灌入。
 ///
-/// 提示语约定（v0.1.1）：**不再使用系统 tooltip**。浮窗 level 是 `.screenSaver`(1000)，
+/// 提示语约定（v0.1.2）：**不再使用系统 tooltip**。浮窗 level 是 `.screenSaver`(1000)，
 /// 系统 tooltip 是独立窗口且层级更低，会被压在浮窗后面只露出一小部分，初始延迟也无公开 API 可调。
-/// 因此这里只负责「鼠标进入了哪个控件、该显示什么文案」，经 `onHintChange` 零延迟上抛，
-/// 由 `PiPWindowController` 在浮窗自己的视图树里画提示条。无障碍标签（`setAccessibilityLabel`）全部保留。
+/// 因此这里只负责「鼠标进入了哪个控件、该显示什么文案」，连同该控件的**屏幕坐标 frame** 经
+/// `onHintChange` 零延迟上抛，由 `PiPWindowController` 用跟随浮窗的子窗口画在图标上方。
+/// 无障碍标签（`setAccessibilityLabel`）全部保留。
 final class OverlayControlsView: NSView {
 
     // MARK: - 对外回调
@@ -29,8 +30,10 @@ final class OverlayControlsView: NSView {
     /// 暂停 / 继续
     var onTogglePause: (() -> Void)?
 
-    /// 鼠标进入某个控件时**立即**（零延迟）上抛 `(提示文案, 该控件在控制条自身坐标系内的 frame)`；
+    /// 鼠标进入某个控件时**立即**（零延迟）上抛 `(提示文案, 该控件在屏幕坐标下的 frame)`；
     /// 鼠标离开、或控制条整体隐藏时上抛 nil。
+    ///
+    /// 用屏幕坐标而不是控制条局部坐标：提示条已改成跟随浮窗的独立子窗口，只能按屏幕坐标定位。
     var onHintChange: (((String, CGRect)?) -> Void)?
 
     // MARK: - 对外状态
@@ -65,6 +68,10 @@ final class OverlayControlsView: NSView {
         static let fade: TimeInterval = 0.12
         /// 图标符号字号
         static let symbolPointSize: CGFloat = 11
+        /// 悬停高亮块比按钮各边外扩的距离
+        static let hoverPadding: CGFloat = 3
+        /// 悬停高亮块圆角
+        static let hoverCornerRadius: CGFloat = 5
     }
 
     // MARK: - 颜色
@@ -75,10 +82,42 @@ final class OverlayControlsView: NSView {
     private static var inactiveTint: NSColor { .secondaryLabelColor }
     /// 不可用
     private static var disabledTint: NSColor { .tertiaryLabelColor }
+    /// 悬停高亮块底色
+    private static var hoverFill: NSColor { NSColor.white.withAlphaComponent(0.16) }
+
+    /// 按钮着色语义。悬停提亮时按语义处理，避免直接比较动态语义色是否相等。
+    private enum TintRole {
+        /// 开关处于「开」
+        case active
+        /// 常态
+        case inactive
+        /// 不可用
+        case disabled
+    }
+
+    /// 语义 → 实际颜色。悬停时常态灰提亮到标签色，强调色保持强调语义但混白加亮，禁用态不提亮。
+    private static func tintColor(_ role: TintRole, hovered: Bool) -> NSColor {
+        switch role {
+        case .active: return hovered ? brightened(activeTint) : activeTint
+        case .inactive: return hovered ? .labelColor : inactiveTint
+        case .disabled: return disabledTint
+        }
+    }
+
+    /// 向白色方向混合，语义色解析失败时原样返回（此时仅靠高亮块表达 hover）。
+    private static func brightened(_ color: NSColor, by fraction: CGFloat = 0.35) -> NSColor {
+        if let highlighted = color.highlight(withLevel: fraction) { return highlighted }
+        guard let rgb = color.usingColorSpace(.sRGB) else { return color }
+        func mix(_ c: CGFloat) -> CGFloat { min(1, c + (1 - c) * fraction) }
+        return NSColor(srgbRed: mix(rgb.redComponent), green: mix(rgb.greenComponent),
+                       blue: mix(rgb.blueComponent), alpha: rgb.alphaComponent)
+    }
 
     // MARK: - 子视图
 
     private let backdrop = NSVisualEffectView()
+    /// 复用的悬停高亮块：始终只有一层，跟随当前悬停按钮移动
+    private let hoverHighlight = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let zoomLabel = NSTextField(labelWithString: "")
 
@@ -109,10 +148,16 @@ final class OverlayControlsView: NSView {
 
     /// 按钮 → 当前提示文案（含开关态）。键为 `ObjectIdentifier(按钮)`。
     private var hintTexts: [ObjectIdentifier: String] = [:]
+    /// 按钮 → 常态着色语义（由 `update(state:)` 灌入）。悬停提亮在此基础上计算。
+    private var tintRoles: [ObjectIdentifier: TintRole] = [:]
     /// 各目标当前挂着的 tracking area（挂在目标视图自己身上，owner 是本视图）
     private var hintTrackingAreas: [HintTarget: NSTrackingArea] = [:]
     /// 鼠标当前所在的目标。相邻按钮之间移动时 enter/exit 的先后顺序并不保证，用它去重。
     private var activeHintTarget: HintTarget?
+    /// 当前被高亮的按钮（标题区、禁用按钮不参与）
+    private weak var hoveredButton: NSButton?
+    /// 帧率按钮的当前文字。它靠 attributedTitle 着色，重设颜色时需要原文。
+    private var fpsTitleText = "15f"
 
     // MARK: - 初始化
 
@@ -127,6 +172,7 @@ final class OverlayControlsView: NSView {
         isHidden = true
 
         setupBackdrop()
+        setupHoverHighlight()
         setupLabels()
         setupButtons()
         setupAccessibility()
@@ -146,6 +192,16 @@ final class OverlayControlsView: NSView {
         backdrop.layer?.masksToBounds = true
         backdrop.autoresizingMask = [.width, .height]
         addSubview(backdrop)
+    }
+
+    /// 高亮块压在毛玻璃底之上、按钮之下（按钮随后 addSubview，天然更高），frame 全靠代码摆。
+    private func setupHoverHighlight() {
+        hoverHighlight.wantsLayer = true
+        hoverHighlight.layer?.cornerRadius = Metrics.hoverCornerRadius
+        hoverHighlight.layer?.backgroundColor = Self.hoverFill.cgColor
+        hoverHighlight.autoresizingMask = []
+        hoverHighlight.isHidden = true
+        addSubview(hoverHighlight, positioned: .above, relativeTo: backdrop)
     }
 
     private func setupLabels() {
@@ -180,10 +236,11 @@ final class OverlayControlsView: NSView {
         fpsButton.target = self
         fpsButton.action = #selector(handleCycleFPS)
         fpsButton.refusesFirstResponder = true
-        setHintText(L.t("切换帧率", "Cycle frame rate"), for: fpsButton)
+        setHintText(L.t("帧率（点按切换）", "Frame rate (click to cycle)"), for: fpsButton)
         fpsButton.setAccessibilityLabel(L.t("切换帧率", "Cycle frame rate"))
         addSubview(fpsButton)
-        setFPSTitle("15f", color: Self.inactiveTint)
+        tintRoles[ObjectIdentifier(fpsButton)] = .inactive
+        setFPSTitle("15f")
 
         configureIconButton(
             resetZoomButton, symbols: ["arrow.up.left.and.down.right.magnifyingglass"],
@@ -192,7 +249,7 @@ final class OverlayControlsView: NSView {
             action: #selector(handleResetZoom)
         )
         resetZoomButton.isEnabled = false
-        resetZoomButton.contentTintColor = Self.disabledTint
+        setTintRole(.disabled, for: resetZoomButton)
 
         configureIconButton(
             autoHideButton, symbols: ["eye"],
@@ -231,13 +288,13 @@ final class OverlayControlsView: NSView {
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
         button.image = Self.symbolImage(symbols, accessibility: accessibility)
-        button.contentTintColor = Self.inactiveTint
         button.target = self
         button.action = action
         button.refusesFirstResponder = true
         setHintText(hint, for: button)
         button.setAccessibilityLabel(accessibility)
         addSubview(button)
+        setTintRole(.inactive, for: button)
     }
 
     // MARK: - 布局
@@ -285,8 +342,9 @@ final class OverlayControlsView: NSView {
             )
         }
 
-        // 按钮 frame 变了：tracking area 与已上抛的锚点 frame 都要跟着刷新
+        // 按钮 frame 变了：tracking area、高亮块与已上抛的锚点 frame 都要跟着刷新
         rebuildHintTrackingAreas()
+        refreshHoverHighlight()
         if let target = activeHintTarget { pushHint(for: target) }
     }
 
@@ -305,9 +363,9 @@ final class OverlayControlsView: NSView {
     /// 用会话状态刷新控制条：帧率文字、暂停图标、开关高亮、复位可用性、倍率标签。
     func update(state: PiPSessionState) {
         // 帧率
-        setFPSTitle("\(state.fps.rawValue)f", color: Self.inactiveTint)
-        setHintText(L.t("帧率 \(state.fps.rawValue) fps，点按切换下一档",
-                        "\(state.fps.rawValue) fps — click to cycle"), for: fpsButton)
+        setFPSTitle("\(state.fps.rawValue)f")
+        setHintText(L.t("帧率 \(state.fps.rawValue) fps（点按切换）",
+                        "Frame rate \(state.fps.rawValue) fps (click to cycle)"), for: fpsButton)
         fpsButton.setAccessibilityLabel(L.t("帧率 \(state.fps.rawValue) 帧每秒",
                                             "Frame rate \(state.fps.rawValue) fps"))
 
@@ -316,14 +374,14 @@ final class OverlayControlsView: NSView {
             [state.isPaused ? "play.fill" : "pause.fill"],
             accessibility: state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause")
         )
-        pauseButton.contentTintColor = state.isPaused ? Self.activeTint : Self.inactiveTint
+        setTintRole(state.isPaused ? .active : .inactive, for: pauseButton)
         setHintText(state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause"), for: pauseButton)
         pauseButton.setAccessibilityLabel(state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause"))
 
         // 复位缩放：仅放大状态可用
         let zoomed = state.zoom > 1.001
         resetZoomButton.isEnabled = zoomed
-        resetZoomButton.contentTintColor = zoomed ? Self.inactiveTint : Self.disabledTint
+        setTintRole(zoomed ? .inactive : .disabled, for: resetZoomButton)
 
         // 自动隐藏：开 → eye.slash（鼠标移入会淡出）
         autoHideButton.image = Self.symbolImage(
@@ -359,6 +417,8 @@ final class OverlayControlsView: NSView {
 
         // 文案随开关态变了：鼠标正停在该控件上时立即刷新提示，不必移开再移回
         if let target = activeHintTarget { pushHint(for: target) }
+        // 复位按钮可能刚被禁用：禁用态不该留着高亮
+        refreshHoverHighlight()
 
         needsLayout = true
     }
@@ -366,19 +426,45 @@ final class OverlayControlsView: NSView {
     private func applyToggleStyle(_ button: NSButton, isOn: Bool,
                                   onHint: String, offHint: String,
                                   onLabel: String, offLabel: String) {
-        button.contentTintColor = isOn ? Self.activeTint : Self.inactiveTint
+        setTintRole(isOn ? .active : .inactive, for: button)
         setHintText(isOn ? onHint : offHint, for: button)
         button.setAccessibilityLabel(isOn ? onLabel : offLabel)
     }
 
-    private func setFPSTitle(_ text: String, color: NSColor) {
+    /// 更新帧率按钮文字，颜色按当前着色语义 + 悬停态解析。
+    private func setFPSTitle(_ text: String) {
+        fpsTitleText = text
+        applyTint(to: fpsButton)
+    }
+
+    /// 用指定颜色重画帧率按钮文字（等宽数字、居中）。
+    private func renderFPSTitle(color: NSColor) {
         let style = NSMutableParagraphStyle()
         style.alignment = .center
-        fpsButton.attributedTitle = NSAttributedString(string: text, attributes: [
+        fpsButton.attributedTitle = NSAttributedString(string: fpsTitleText, attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
             .foregroundColor: color,
             .paragraphStyle: style,
         ])
+    }
+
+    // MARK: - 着色（常态语义 + 悬停提亮）
+
+    /// 记录按钮的常态着色语义并立即生效。
+    private func setTintRole(_ role: TintRole, for button: NSButton) {
+        tintRoles[ObjectIdentifier(button)] = role
+        applyTint(to: button)
+    }
+
+    /// 按「常态语义 + 是否正被悬停」解析出最终颜色。帧率按钮走 attributedTitle，其余走 contentTintColor。
+    private func applyTint(to button: NSButton) {
+        let role = tintRoles[ObjectIdentifier(button)] ?? .inactive
+        let color = Self.tintColor(role, hovered: hoveredButton === button)
+        if button === fpsButton {
+            renderFPSTitle(color: color)
+        } else {
+            button.contentTintColor = color
+        }
     }
 
     // MARK: - 显示 / 隐藏
@@ -465,6 +551,7 @@ final class OverlayControlsView: NSView {
         }
         activeHintTarget = target
         pushHint(for: target)
+        refreshHoverHighlight()
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -477,20 +564,58 @@ final class OverlayControlsView: NSView {
         clearHint()
     }
 
-    /// 零延迟上抛：文案 + 该控件在**控制条自身坐标系**内的 frame（按钮/标题都是本视图的直接子视图）。
+    /// 零延迟上抛：文案 + 该控件在**屏幕坐标**下的 frame（提示条是独立子窗口，只认屏幕坐标）。
     private func pushHint(for target: HintTarget) {
         guard desiredVisible, !isHidden, let text = hintText(for: target) else { return }
-        onHintChange?((text, hintTargetView(target).frame))
+        guard let rect = screenFrame(of: hintTargetView(target)) else { return }
+        onHintChange?((text, rect))
+    }
+
+    /// 视图局部 frame → 屏幕坐标（视图 → 窗口 → 屏幕）。尚未上屏时返回 nil。
+    private func screenFrame(of view: NSView) -> CGRect? {
+        guard let window = view.window else { return nil }
+        return window.convertToScreen(view.convert(view.bounds, to: nil))
     }
 
     private func clearHint() {
         activeHintTarget = nil
+        refreshHoverHighlight()
         onHintChange?(nil)
     }
 
     private static func hintTarget(of event: NSEvent) -> HintTarget? {
         guard let raw = event.trackingArea?.userInfo?[hintTargetKey] as? Int else { return nil }
         return HintTarget(rawValue: raw)
+    }
+
+    // MARK: - 悬停高亮
+
+    /// 让复用的高亮块跟随当前悬停按钮；无悬停 / 悬停在标题 / 按钮不可用 / 控制条已隐藏时收掉。
+    /// 上一个按钮的着色一并还原，避免切换或隐藏后留下「亮着」的残影。
+    private func refreshHoverHighlight() {
+        let target = (desiredVisible && !isHidden) ? activeHintTarget : nil
+        let button = target.flatMap { hoverableButton(for: $0) }
+
+        if button !== hoveredButton {
+            let previous = hoveredButton
+            hoveredButton = button
+            if let previous { applyTint(to: previous) }   // 还原上一个按钮的常态着色
+            if let button { applyTint(to: button) }
+        }
+
+        guard let button else {
+            hoverHighlight.isHidden = true
+            return
+        }
+        hoverHighlight.frame = button.frame.insetBy(dx: -Metrics.hoverPadding, dy: -Metrics.hoverPadding)
+        hoverHighlight.isHidden = false
+    }
+
+    /// 可高亮的按钮：标题区不算，禁用 / 隐藏的按钮（如未放大时的复位）不算。
+    private func hoverableButton(for target: HintTarget) -> NSButton? {
+        guard let button = hintTargetView(target) as? NSButton,
+              button.isEnabled, !button.isHidden else { return nil }
+        return button
     }
 
     // MARK: - 命中测试（保住浮窗拖动）

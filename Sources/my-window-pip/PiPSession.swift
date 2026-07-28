@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreMedia
 import ScreenCaptureKit
 
@@ -23,8 +24,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     // 运行期辅助状态
     private var isAutoHidden = false
-    /// 自动隐藏淡出后，按住 ⌥ 的「临时唤回」态
-    private var isPeeking = false
+    /// 自动隐藏淡出后的「临时唤回」原因：按住 ⌥，或鼠标停在顶栏热区
+    private enum PeekReason { case option, bar }
+    private var peekReason: PeekReason?
+    private var isPeeking: Bool { peekReason != nil }
     private var idleThrottled = false
     private var reconnectAttempt = 0
     private var reconnectWork: DispatchWorkItem?
@@ -106,6 +109,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     var debugClickThrough: Bool { windowController.window.ignoresMouseEvents }
     var debugAutoHideActive: Bool { isAutoHidden }
     var debugPeeking: Bool { isPeeking }
+    var debugBarScreenFrame: CGRect? { windowController.barScreenFrame }
 
     func setLevelMode(_ mode: WindowLevelMode) { windowController.setLevelMode(mode) }
 
@@ -470,6 +474,11 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 guard let self, !self.isClosed, !self.state.isHidden else { return nil }
                 return self.windowController.window.frame
             },
+            hotZoneProvider: { [weak self] in
+                // 顶栏热区：自动隐藏开启时，鼠标停在这里仍然可以操作与拖动
+                guard let self, !self.isClosed, !self.state.isHidden else { return nil }
+                return self.windowController.barScreenFrame
+            },
             onChange: { [weak self] hover in
                 self?.handleHover(hover)
             }
@@ -478,14 +487,15 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     /// 悬停状态处理。
     ///
-    /// 自动隐藏开启后浮窗会淡出并点击穿透，此时它收不到任何鼠标事件——
-    /// 所以必须留逃生通道：**按住 ⌥ 临时唤回**（不透明 + 可点击 + 显示控制条），
-    /// 松开 ⌥ 回到淡出态。另一条保底出口在菜单栏的每会话子菜单里。
+    /// 自动隐藏开启后浮窗会淡出并点击穿透，此时它收不到任何鼠标事件——所以留了两条唤回通道：
+    /// - **鼠标停在顶栏热区**：顶栏区域始终可操作（点按钮、按住拖动、右键），画面区域仍然穿透
+    /// - **按住 ⌥**：在画面区域也能把整窗临时唤回
+    /// 另有一条保底出口在菜单栏的每会话子菜单里。
     private func handleHover(_ hover: HoverState) {
         guard !isClosed else { return }
 
         guard state.autoHide else {
-            isPeeking = false
+            peekReason = nil
             windowController.setControlsVisible(hover.isHovering)
             return
         }
@@ -495,8 +505,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             return
         }
 
-        if hover.optionHeld {
-            beginPeek()
+        if hover.isOverHotZone {
+            beginPeek(.bar)           // 热区优先于 ⌥
+        } else if hover.optionHeld {
+            beginPeek(.option)
         } else {
             beginAutoHide()
         }
@@ -505,7 +517,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private func beginAutoHide() {
         guard !isAutoHidden || isPeeking else { return }
         isAutoHidden = true
-        isPeeking = false
+        peekReason = nil
         windowController.showHint(nil, near: nil)
         windowController.setAlpha(Preferences.shared.autoHideOpacity, animated: true)
         windowController.setClickThrough(true)
@@ -513,24 +525,28 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         if !state.isPaused { engine.pause() }
     }
 
-    /// 按住 ⌥ 临时唤回：恢复不透明与可点击，让用户能点掉眼睛图标或调出右键菜单。
-    private func beginPeek() {
-        guard !isPeeking else { return }
-        isPeeking = true
+    /// 临时唤回：恢复不透明与可点击，让用户能点按钮、拖动窗口或调出右键菜单。
+    private func beginPeek(_ reason: PeekReason) {
+        guard peekReason != reason else { return }
+        peekReason = reason
         isAutoHidden = true
         windowController.setAlpha(1, animated: true)
         windowController.setClickThrough(false)
         windowController.setControlsVisible(true)
         if !state.isPaused, !state.isHidden { engine.resume() }
-        windowController.showHint(
-            L.t("松开 ⌥ 恢复透明", "Release ⌥ to fade again"), near: nil
-        )
+        switch reason {
+        case .option:
+            windowController.showHint(L.t("松开 ⌥ 恢复透明", "Release ⌥ to fade again"), near: nil)
+        case .bar:
+            windowController.showHint(L.t("移出顶栏后会重新淡出", "Leave the top bar to fade again"),
+                                      near: nil, duration: 2.0)
+        }
     }
 
     private func endAutoHide() {
         guard isAutoHidden || isPeeking else { return }
         isAutoHidden = false
-        isPeeking = false
+        peekReason = nil
         windowController.showHint(nil, near: nil)
         windowController.setAlpha(1, animated: true)
         windowController.setClickThrough(false)
@@ -602,6 +618,80 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func pipRequestToggleIdleDetection() { toggleIdleDetection() }
 
     func pipRequestTogglePause() { setPaused(!state.isPaused) }
+
+    func pipRequestActivateSource() { activateSource() }
+
+    func pipRequestToggleClickToActivate() {
+        Preferences.shared.clickToActivateSource.toggle()
+        let on = Preferences.shared.clickToActivateSource
+        windowController.showHint(
+            on ? L.t("单击浮窗将切换到源应用", "Click the PiP to switch to the source app")
+               : L.t("已关闭「单击回源」", "Click-to-switch is off"),
+            near: nil, duration: 2.0
+        )
+        windowController.update(state: state)
+    }
+
+    // MARK: - 单击回源
+
+    /// 单击浮窗 → 切换到源应用窗口。
+    ///
+    /// 零权限路径只能激活「应用」；已授予辅助功能权限时再用 AX 把**那个具体窗口**抬到最前
+    /// （只读 `AXIsProcessTrusted()`，未授权直接跳过，绝不弹权限框）。
+    func activateSource() {
+        guard !isClosed else { return }
+        guard Preferences.shared.clickToActivateSource else {
+            windowController.bringToFront()
+            return
+        }
+
+        switch state.source {
+        case let .window(windowID, bundleID, appName, title):
+            var pid = ShareableContentStore.shared.cachedWindow(id: windowID)?
+                .owningApplication?.processID
+            if pid == nil, let bundleID, !bundleID.isEmpty {
+                pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                    .first?.processIdentifier
+            }
+            guard let pid, let app = NSRunningApplication(processIdentifier: pid) else {
+                windowController.showHint(
+                    L.t("源应用似乎已退出", "The source app seems to have quit"),
+                    near: nil, duration: 2.0
+                )
+                return
+            }
+            _ = app.activate()
+            raiseWindowViaAccessibility(pid: pid, title: title)
+            Log.debug("单击回源：\(appName)")
+
+        case .region:
+            windowController.showHint(
+                L.t("该浮窗来自屏幕区域，没有可切换的源应用",
+                    "This PiP captures a screen region — no source app to switch to"),
+                near: nil, duration: 2.0
+            )
+        }
+    }
+
+    private func raiseWindowViaAccessibility(pid: pid_t, title: String) {
+        guard Permissions.hasAccessibility else { return }
+        let app = AXUIElementCreateApplication(pid)
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &raw) == .success,
+              let windows = raw as? [AXUIElement], !windows.isEmpty else { return }
+
+        let wanted = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let target = windows.first { window in
+            var titleRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString,
+                                                &titleRef) == .success,
+                  let text = titleRef as? String else { return false }
+            return text == wanted
+        } ?? windows[0]
+
+        AXUIElementPerformAction(target, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(app, kAXFocusedWindowAttribute as CFString, target)
+    }
 
     func pipDidMove() {
         Preferences.shared.setOrigin(windowController.frameOrigin, for: state.source.preferenceKey)

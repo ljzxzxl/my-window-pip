@@ -60,40 +60,41 @@ private final class PiPRootView: NSView {
     }
 }
 
-// MARK: - 浮窗内提示条
+// MARK: - 提示条视图
 
-/// 画在浮窗自己视图树里的提示条（替代系统 tooltip）。
+/// 提示条内容视图（自绘背景 + 文字），由 `PiPWindowController` 放进一个跟随浮窗的子窗口里。
 ///
 /// 为什么不用系统 tooltip：浮窗 level 为 `.screenSaver`(1000)，而系统 tooltip 是层级更低的独立窗口，
 /// 会被压在浮窗后面只露出窗外的一小截；它的初始延迟也由 `NSToolTipManager` 私有控制，无法调整。
-/// 自绘的提示条与浮窗同属一个窗口，既没有层级问题，出现时机也完全自主。
+///
+/// 为什么不用 `NSTextField`：`NSTextField` 的 cell 自身还有约 2pt 的左右内边距，
+/// 按 `NSString.size(withAttributes:)` 算出的宽度总会比 cell 实际需要的少 4pt 左右，
+/// 于是每条提示都在尾部截出「…」，「暂停」这种两字短文案更是退化成只剩一个「…」。
+/// 改为在 `draw(_:)` 里用 `NSString.draw(at:withAttributes:)` 自绘后，测量与绘制用的是同一套
+/// attributes，宽度完全可控；真需要截断时也由我们自己逐字缩减并补「…」。
 private final class HintLabel: NSView {
     /// 圆角
     private static let cornerRadius: CGFloat = 6
-    /// 文字左右 / 上下内边距
-    private static let hInset: CGFloat = 7
-    private static let vInset: CGFloat = 4
+    /// 文字左右内边距
+    private static let hInset: CGFloat = 8
+    /// 文字上下内边距
+    private static let vInset: CGFloat = 5
+    /// 测量容错：宽度多留 1pt，避免亚像素舍入把最后一个字挤掉
+    private static let measureSlack: CGFloat = 1
     private static let font = NSFont.systemFont(ofSize: 11)
+    private static let ellipsis = "…"
+    private static let background = NSColor.black.withAlphaComponent(0.82)
 
-    private let label = NSTextField(labelWithString: "")
+    /// 测量与绘制必须用同一套 attributes，否则又会回到「算出来的宽度不够画」的老问题
+    private static let textAttributes: [NSAttributedString.Key: Any] = [
+        .font: font,
+        .foregroundColor: NSColor.white,
+    ]
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = Self.cornerRadius
-        layer?.masksToBounds = true
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.82).cgColor
-        alphaValue = 0
-        isHidden = true
-
-        label.font = Self.font
-        label.textColor = .white
-        label.alignment = .left
-        label.usesSingleLineMode = true
-        label.lineBreakMode = .byTruncatingTail
-        label.cell?.truncatesLastVisibleLine = true
-        label.drawsBackground = false
-        addSubview(label)
+        layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     required init?(coder: NSCoder) {
@@ -103,24 +104,52 @@ private final class HintLabel: NSView {
     var text: String = "" {
         didSet {
             guard text != oldValue else { return }
-            label.stringValue = text
-            needsLayout = true
+            needsDisplay = true
         }
     }
 
-    /// 单行渲染所需尺寸；超过 `maxWidth` 时按 `maxWidth` 收口，文字交给尾部截断处理。
+    /// 单行渲染所需尺寸（含内边距）；超过 `maxWidth` 时按 `maxWidth` 收口，文字交给 `fitted` 截断。
     static func preferredSize(for text: String, maxWidth: CGFloat) -> CGSize {
-        let measured = (text as NSString).size(withAttributes: [.font: font])
-        let width = min(ceil(measured.width) + hInset * 2, max(0, maxWidth))
-        return CGSize(width: width, height: ceil(measured.height) + vInset * 2)
+        let measured = (text as NSString).size(withAttributes: textAttributes)
+        let width = min(ceil(measured.width) + measureSlack + hInset * 2, max(0, maxWidth))
+        return CGSize(width: ceil(max(0, width)), height: ceil(measured.height) + vInset * 2)
     }
 
-    override func layout() {
-        super.layout()
-        label.frame = bounds.insetBy(dx: Self.hInset, dy: Self.vInset)
+    /// 手动截断：放得下就原样返回；放不下则逐字缩减并补「…」。
+    /// 连「一个字 + …」都放不下时返回空串——宁可不画，也不显示一个孤零零的「…」。
+    static func fitted(_ text: String, maxTextWidth: CGFloat) -> String {
+        guard maxTextWidth > 0 else { return "" }
+        guard width(of: text) > maxTextWidth else { return text }
+
+        var chars = Array(text)
+        while !chars.isEmpty {
+            chars.removeLast()
+            guard !chars.isEmpty else { break }
+            let candidate = String(chars) + ellipsis
+            if width(of: candidate) <= maxTextWidth { return candidate }
+        }
+        return ""
     }
 
-    /// 绝不参与命中测试：浮窗拖动、滚轮缩放平移、双击复位等手势必须原样落到下层内容视图。
+    private static func width(of text: String) -> CGFloat {
+        ceil((text as NSString).size(withAttributes: textAttributes).width)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard bounds.width > 1, bounds.height > 1 else { return }
+
+        Self.background.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius).fill()
+
+        let display = Self.fitted(text, maxTextWidth: bounds.width - Self.hInset * 2)
+        guard !display.isEmpty else { return }
+        let size = (display as NSString).size(withAttributes: Self.textAttributes)
+        let origin = CGPoint(x: (bounds.minX + Self.hInset).rounded(),
+                             y: (bounds.minY + (bounds.height - size.height) / 2).rounded())
+        (display as NSString).draw(at: origin, withAttributes: Self.textAttributes)
+    }
+
+    /// 绝不参与命中测试。承载它的子窗口已经 `ignoresMouseEvents = true`，这里再兜一层。
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
@@ -142,14 +171,16 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private static let resizeDebounceInterval: TimeInterval = 0.25
     /// alpha 动画时长（§4.10）
     private static let alphaAnimationDuration: TimeInterval = 0.12
-    /// 提示条与控制条之间的垂直间隙
-    private static let hintGap: CGFloat = 4
-    /// 提示条相对内容区的安全内缩（clamp 用）
+    /// 提示条与触发图标之间的垂直间隙
+    private static let hintGap: CGFloat = 6
+    /// 提示条相对屏幕可见区域的安全内缩（clamp 用）
     private static let hintEdgeInset: CGFloat = 6
     private static let hintFadeInDuration: TimeInterval = 0.08
     private static let hintFadeOutDuration: TimeInterval = 0.12
     /// 低于该不透明度视为「自动隐藏淡出态」，此时不打扰用户
     private static let hintMinWindowAlpha: CGFloat = 0.99
+    /// 顶栏热区在控制条上下各放宽的距离（`barScreenFrame`）
+    private static let barHotZoneInset: CGFloat = 4
 
     // MARK: - 对外
 
@@ -173,6 +204,18 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         return panel.frame.contains(NSEvent.mouseLocation)
     }
 
+    /// 控制条区域在屏幕坐标下的 frame（上下各放宽 4pt），浮窗未显示 / 已隐藏时返回 nil。
+    ///
+    /// 主 agent 用它做「自动隐藏开启时，鼠标移到顶栏仍可操作」的热区判定。
+    /// 每次都按实时 frame 计算（不缓存），窗口移动、resize、跨屏后自动跟随。
+    var barScreenFrame: CGRect? {
+        guard panel.isVisible else { return nil }
+        let bar = Self.overlayFrame(in: root.bounds)
+        guard bar.width > 1, bar.height > 1 else { return nil }
+        let inScreen = panel.convertToScreen(root.convert(bar, to: nil))
+        return inScreen.insetBy(dx: 0, dy: -Self.barHotZoneInset)
+    }
+
     // MARK: - 内部状态
 
     private let panel: PiPPanel
@@ -181,6 +224,14 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private let placeholder = PlaceholderView(frame: .zero)
     private let overlay = OverlayControlsView(frame: .zero)
     private let hint = HintLabel(frame: .zero)
+    /// 承载提示条的子窗口：borderless + nonactivating，`addChildWindow` 后随浮窗移动 / 关闭。
+    /// 之所以不放在浮窗视图树里：控制条距浮窗顶边只有 6pt，提示条要画到窗口之外才有「图标上方」。
+    private let hintWindow = NSPanel(
+        contentRect: CGRect(x: 0, y: 0, width: 10, height: 10),
+        styleMask: [.borderless, .nonactivatingPanel],
+        backing: .buffered,
+        defer: false
+    )
 
     private(set) var aspect: CGSize
     private var titleText: String
@@ -195,7 +246,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     // 提示条状态
     /// 当前提示文案（nil = 未显示）
     private var hintText: String?
-    /// 触发按钮在**控制条自身坐标系**内的 frame；nil 表示用默认位置（控制条正下方、右对齐）
+    /// 触发按钮在**屏幕坐标**下的 frame；nil 表示用默认位置（控制条整体上方、水平居中）
     private var hintAnchor: CGRect?
     /// `duration` 到点自动淡出的定时器，重复调用 `showHint` 会打断它
     private var hintDismissWork: DispatchWorkItem?
@@ -210,6 +261,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private let zoomResetItem = NSMenuItem()
     private let autoHideItem = NSMenuItem()
     private let idleItem = NSMenuItem()
+    private let clickActivateItem = NSMenuItem()
     private var fpsItems: [FPSStep: NSMenuItem] = [:]
     private var levelItems: [WindowLevelMode: NSMenuItem] = [:]
     /// 自动隐藏透明度档位项（下标与 `Preferences.autoHideOpacitySteps` 一一对应）
@@ -242,6 +294,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
         configurePanel()
         buildViewHierarchy()
+        configureHintWindow()
         buildMenu()
         setTitle(title)
         lastReportedScale = backingScale
@@ -294,7 +347,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = false
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        // 关掉系统的背景拖动：它会在 mouseDown 之前吞掉整串事件，拿不到干净的 mouseUp，
+        // 「单击浮窗回源」就无法与拖动区分。拖动改由 PiPContentView 手动实现。
+        panel.isMovableByWindowBackground = false
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
@@ -326,9 +381,6 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         overlay.frame = Self.overlayFrame(in: root.bounds)
         root.addSubview(overlay)
 
-        // 提示条压在控制条之上（位置每次显示时按锚点重算，不用 autoresizing）
-        root.addSubview(hint, positioned: .above, relativeTo: overlay)
-
         placeholder.setVisible(false, animated: false)
         overlay.setVisible(false, animated: false)
 
@@ -349,6 +401,16 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
             self?.delegate?.pipRequestToggleIdleDetection()
         }
         contentView.onRequestTogglePause = { [weak self] in self?.delegate?.pipRequestTogglePause() }
+        // 干净的单击（无修饰键、未拖动）→ 请求切回源应用
+        contentView.onRequestActivateSource = { [weak self] in
+            self?.delegate?.pipRequestActivateSource()
+        }
+        // 手动拖动结束：位置持久化 + 跨屏后按新 scale 重新出流（系统拖动时这两件事由 windowDidMove 做）
+        contentView.onDidDragWindow = { [weak self] in
+            guard let self else { return }
+            self.delegate?.pipDidMove()
+            self.notifyIfScaleChanged()
+        }
 
         overlay.onClose = { [weak self] in self?.delegate?.pipRequestClose() }
         overlay.onCycleFPS = { [weak self] in self?.cycleFPS() }
@@ -380,6 +442,32 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
                       height: min(height, bounds.height))
     }
 
+    // MARK: - 提示条子窗口
+
+    /// 提示条子窗口：与浮窗同层级、绝不拦截鼠标、不被别的捕获工具录到，
+    /// 并通过 `addChildWindow` 绑定到浮窗上（浮窗移动 / orderOut / close 时自动跟随）。
+    private func configureHintWindow() {
+        hintWindow.isFloatingPanel = true
+        hintWindow.becomesKeyOnlyIfNeeded = true
+        hintWindow.hidesOnDeactivate = false
+        hintWindow.backgroundColor = .clear
+        hintWindow.isOpaque = false
+        hintWindow.hasShadow = false
+        hintWindow.ignoresMouseEvents = true    // 关键：不能挡住控制条按钮的点击
+        hintWindow.sharingType = .none          // 防镜中镜
+        hintWindow.isReleasedWhenClosed = false
+        hintWindow.animationBehavior = .none
+        hintWindow.tabbingMode = .disallowed
+        hintWindow.level = panel.level
+        hintWindow.collectionBehavior = panel.collectionBehavior
+        hintWindow.alphaValue = 0
+        hintWindow.contentView = hint
+
+        panel.addChildWindow(hintWindow, ordered: .above)
+        // addChildWindow 会顺带把子窗口摆上屏，先收起来，等真的有提示再显示
+        hintWindow.orderOut(nil)
+    }
+
     private func observeScreenParameters() {
         // 显示器拔插 / 分辨率变化：把浮窗收回可见区域，并按新 scale 重新出流
         screenObserver = NotificationCenter.default.addObserver(
@@ -394,6 +482,8 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
     func show() {
         panel.orderFrontRegardless()
+        // 子窗口会随父窗口一起上屏：还没有提示时保持收起
+        if hintText == nil { hintWindow.orderOut(nil) }
         _ = panel.makeFirstResponder(contentView)
         refreshMenu()
     }
@@ -410,20 +500,25 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         }
         contentView.flushAndReset()
         panel.delegate = nil
+        // 先解除父子关系再各自关闭，避免子窗口指向已释放的父窗口
+        panel.removeChildWindow(hintWindow)
+        hintWindow.orderOut(nil)
         panel.orderOut(nil)
         panel.close()          // isReleasedWhenClosed = false，安全
+        hintWindow.close()     // 同样 isReleasedWhenClosed = false
     }
 
-    // MARK: - 浮窗内提示条
+    // MARK: - 提示条（跟随浮窗的子窗口）
 
-    /// 在浮窗内显示提示条（不用系统 tooltip，避免被浮窗层级遮挡）。
+    /// 在浮窗外显示提示条（不用系统 tooltip，避免被浮窗层级遮挡）。
     ///
     /// - Parameters:
     ///   - text: nil / 空串表示立即隐藏提示
-    ///   - anchorInOverlay: 触发按钮在**控制条自身坐标系**内的 frame；nil 表示用默认位置
-    ///     （控制条正下方、右对齐到控制条右边缘）
+    ///   - anchorInScreen: 触发图标在**屏幕坐标**下的 frame（v0.1.2 起由控制条直接上抛屏幕坐标，
+    ///     不再是控制条局部坐标）；提示条默认画在该矩形正上方 6pt、水平居中，上方空间不足时翻转到下方。
+    ///     传 nil 表示用默认锚点：控制条整体（即浮窗顶部）。
     ///   - duration: nil 表示常驻直到再次调用；否则到点自动淡出
-    func showHint(_ text: String?, near anchorInOverlay: CGRect?, duration: TimeInterval? = nil) {
+    func showHint(_ text: String?, near anchorInScreen: CGRect?, duration: TimeInterval? = nil) {
         // 无论如何都先掐掉上一条的自动淡出定时器，避免旧定时器把新提示带走
         hintDismissWork?.cancel()
         hintDismissWork = nil
@@ -439,12 +534,15 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         }
 
         // 已经完全显示时只换文案与位置，不再重跑淡入（控制条每次 layout 都会重发当前提示）
-        let wasFullyVisible = !hint.isHidden && hint.alphaValue > 0.999
+        let wasFullyVisible = hintWindow.isVisible && hintWindow.alphaValue > 0.999
         hintText = text
-        hintAnchor = anchorInOverlay
+        hintAnchor = anchorInScreen
         hint.text = text
-        hint.isHidden = false
         layoutHint()
+        if !hintWindow.isVisible {
+            hintWindow.alphaValue = 0                // 淡入起点
+            hintWindow.orderFrontRegardless()        // App 未激活时也要能出现
+        }
         if !wasFullyVisible { fadeHint(to: 1, duration: Self.hintFadeInDuration) }
 
         guard let duration, duration > 0 else { return }
@@ -462,15 +560,15 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         hintText = nil
         hintAnchor = nil
 
-        guard animated, !hint.isHidden, hint.alphaValue > 0 else {
-            hint.alphaValue = 0
-            hint.isHidden = true
+        guard animated, hintWindow.isVisible, hintWindow.alphaValue > 0 else {
+            hintWindow.alphaValue = 0
+            hintWindow.orderOut(nil)
             return
         }
         fadeHint(to: 0, duration: Self.hintFadeOutDuration) { [weak self] in
             // 淡出期间又来了新提示（hintText 非 nil）就别再藏
             guard let self, self.hintText == nil else { return }
-            self.hint.isHidden = true
+            self.hintWindow.orderOut(nil)
         }
     }
 
@@ -480,31 +578,62 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            self.hint.animator().alphaValue = alpha
+            self.hintWindow.animator().alphaValue = alpha
         }, completionHandler: completion)
     }
 
-    /// 定位策略：紧贴控制条下方 `hintGap`，右边缘对齐到锚点右边缘（换算到 root 坐标系），
-    /// 整体 clamp 在 root 内缩 `hintEdgeInset` 的范围内；窗口很窄时宽度先 clamp，文字交给尾部截断。
+    /// 把提示条子窗口摆到锚点上方（不足时翻转到下方），并 clamp 在所在屏幕的可见区域内。
     private func layoutHint() {
         guard let text = hintText, !text.isEmpty else { return }
-        let available = root.bounds.insetBy(dx: Self.hintEdgeInset, dy: Self.hintEdgeInset)
-        guard available.width > 1, available.height > 1 else {
-            hint.frame = .zero
-            return
-        }
+        let anchor = hintAnchor ?? defaultHintAnchor()
+        let available = hintAvailableRect(for: anchor)
+        guard available.width > 1, available.height > 1 else { return }
 
         let size = HintLabel.preferredSize(for: text, maxWidth: available.width)
-        let bar = Self.overlayFrame(in: root.bounds)
-        // 锚点在控制条坐标系内，控制条是 root 的直接子视图，加上它的原点即为 root 坐标
-        let anchorRight = hintAnchor.map { bar.minX + $0.maxX } ?? bar.maxX
+        guard size.width > 1, size.height > 1 else { return }
+        hintWindow.setFrame(Self.hintFrame(size: size, anchor: anchor, available: available),
+                            display: true)
+        hint.needsDisplay = true
+    }
 
-        var x = anchorRight - size.width
+    /// `near: nil` 时的默认锚点：控制条整体（屏幕坐标），于是提示条水平居中于浮窗顶部。
+    private func defaultHintAnchor() -> CGRect {
+        let bar = Self.overlayFrame(in: root.bounds)
+        return panel.convertToScreen(root.convert(bar, to: nil))
+    }
+
+    /// 提示条可用区域：锚点所在屏幕的 `visibleFrame` 内缩 `hintEdgeInset`；
+    /// 取不到屏幕时退回浮窗所在屏幕 / 主屏。
+    private func hintAvailableRect(for anchor: CGRect) -> CGRect {
+        let center = CGPoint(x: anchor.midX, y: anchor.midY)
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
+            ?? panel.screen
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        guard let visible = screen?.visibleFrame else { return anchor.insetBy(dx: -240, dy: -60) }
+        return visible.insetBy(dx: Self.hintEdgeInset, dy: Self.hintEdgeInset)
+    }
+
+    /// 定位与「上方优先 / 自动翻转」的唯一判定处：
+    /// 默认贴锚点顶边上方 `hintGap` 并水平居中；上方放不下（顶到屏幕可见区域上界，
+    /// 即屏幕顶部或菜单栏）时翻转到锚点下方；上下都放不下才退化为 clamp。
+    private static func hintFrame(size: CGSize, anchor: CGRect, available: CGRect) -> CGRect {
+        var x = anchor.midX - size.width / 2
         x = min(max(x, available.minX), max(available.minX, available.maxX - size.width))
-        var y = bar.minY - Self.hintGap - size.height
+
+        let above = anchor.maxY + hintGap
+        let below = anchor.minY - hintGap - size.height
+        var y: CGFloat
+        if above + size.height <= available.maxY {
+            y = above
+        } else if below >= available.minY {
+            y = below
+        } else {
+            y = above
+        }
         y = min(max(y, available.minY), max(available.minY, available.maxY - size.height))
 
-        hint.frame = CGRect(x: x.rounded(), y: y.rounded(), width: size.width, height: size.height)
+        return CGRect(x: x.rounded(), y: y.rounded(), width: size.width, height: size.height)
     }
 
     // MARK: - 帧渲染
@@ -577,6 +706,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         levelMode = mode
         panel.level = mode.windowLevel
         panel.collectionBehavior = mode.collectionBehavior
+        // 提示条子窗口层级跟着浮窗走，否则换档后可能被浮窗自己压住
+        hintWindow.level = mode.windowLevel
+        hintWindow.collectionBehavior = mode.collectionBehavior
         refreshMenu()
     }
 
@@ -611,7 +743,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     func hideCompletely() {
         resizeDebounce?.cancel()
         resizeDebounce = nil
-        hideHint(animated: false)
+        hideHint(animated: false)      // 子窗口随父窗口 orderOut，这里显式收掉状态与 alpha
         contentView.flushAndReset()
         panel.orderOut(nil)
     }
@@ -621,6 +753,8 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         alphaTarget = 1
         panel.ignoresMouseEvents = false
         panel.orderFrontRegardless()
+        // 父窗口重新上屏时子窗口可能被一起带出来：没有提示就保持收起
+        if hintText == nil { hintWindow.orderOut(nil) }
         _ = panel.makeFirstResponder(contentView)
     }
 
@@ -759,6 +893,12 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         idleItem.action = #selector(menuToggleIdleDetection)
         contextMenu.addItem(idleItem)
 
+        // 单击回源开关（全局偏好，勾选态在 refreshMenu 里刷新）
+        clickActivateItem.title = L.t("单击浮窗切换到源应用", "Click to switch to source app")
+        clickActivateItem.target = self
+        clickActivateItem.action = #selector(menuToggleClickToActivate)
+        contextMenu.addItem(clickActivateItem)
+
         let levelItem = NSMenuItem(title: L.t("置顶层级", "Window Level"), action: nil, keyEquivalent: "")
         let levelMenu = NSMenu()
         levelMenu.autoenablesItems = false
@@ -802,6 +942,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
         autoHideItem.state = (state?.autoHide ?? false) ? .on : .off
         idleItem.state = (state?.idleDetection ?? true) ? .on : .off
+        clickActivateItem.state = Preferences.shared.clickToActivateSource ? .on : .off
 
         // 透明度勾选：把当前偏好对齐到最近的 5% 档位再比对
         let opacity = Preferences.nearestOpacityStep(Preferences.shared.autoHideOpacity)
@@ -851,6 +992,11 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
     @objc private func menuToggleIdleDetection() {
         delegate?.pipRequestToggleIdleDetection()
+    }
+
+    /// 单击回源是全局偏好：写入与即时生效都由会话层负责（协议方法已声明）
+    @objc private func menuToggleClickToActivate() {
+        delegate?.pipRequestToggleClickToActivate()
     }
 
     /// 层级是纯窗口关注点，会话层协议里没有对应回调：这里就地生效并写回全局偏好。

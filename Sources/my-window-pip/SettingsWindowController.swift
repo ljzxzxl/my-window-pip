@@ -107,6 +107,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             L.t("在浮窗中显示鼠标指针", "Show the mouse cursor inside PiP"),
             on: prefs.showsCursor, action: #selector(showsCursorChanged(_:))
         ))
+        stack.addArrangedSubview(checkbox(
+            L.t("单击浮窗切换到源应用窗口", "Click a PiP window to switch to its source app"),
+            on: prefs.clickToActivateSource, action: #selector(clickToActivateChanged(_:))
+        ))
 
         let loginBox = checkbox(
             L.t("登录时自动启动", "Launch at login"),
@@ -295,6 +299,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func showsCursorChanged(_ sender: NSButton) {
         prefs.showsCursor = sender.state == .on
+    }
+
+    @objc private func clickToActivateChanged(_ sender: NSButton) {
+        prefs.clickToActivateSource = sender.state == .on
     }
 
     @objc private func launchAtLoginChanged(_ sender: NSButton) {

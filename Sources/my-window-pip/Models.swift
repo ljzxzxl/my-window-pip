@@ -192,5 +192,9 @@ protocol PiPWindowDelegate: AnyObject {
     func pipRequestAutoHideOpacity(_ opacity: CGFloat)
     func pipRequestToggleIdleDetection()
     func pipRequestTogglePause()
+    /// 单击浮窗：请求切换到源应用窗口
+    func pipRequestActivateSource()
+    /// 切换「单击浮窗切换到源应用」开关
+    func pipRequestToggleClickToActivate()
     func pipDidMove()
 }

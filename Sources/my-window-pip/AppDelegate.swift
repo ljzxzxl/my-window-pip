@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.info("启动 MyWindowPip \(Updater.currentVersion)，语言：\(L.isZH ? "zh" : "en")")
 
         statusBar = StatusBarController()
+        statusBar?.onShowOnboarding = { [weak self] in
+            self?.showOnboarding(markAsSeen: false)
+        }
         wireHotkeys()
         wireSettings()
         observeSleepWake()
@@ -30,12 +33,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Permissions.ensureScreenRecording()
         }
 
+        // 权限流程走完之后再弹首启引导，避免和系统授权框叠弹
+        if !Preferences.shared.hasSeenOnboarding {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.showOnboarding(markAsSeen: true)
+            }
+        }
+
         Updater.checkSilently { [weak self] info in
             self?.statusBar?.setPendingUpdate(info)
         }
 
         if CommandLine.arguments.contains("--smoke") { runSmokeTest() }
         if CommandLine.arguments.contains("--smoke-autohide") { runAutoHideRegression() }
+        if CommandLine.arguments.contains("--smoke-bar") { runTopBarRegression() }
+        if CommandLine.arguments.contains("--smoke-onboarding") { runOnboardingRegression() }
+    }
+
+    /// `--smoke-onboarding`：首启引导回归自检。展示引导 → 断言窗口已出现 → 关闭 → 断言已清理。
+    private func runOnboardingRegression() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            let anchor = self?.statusBar?.statusItemScreenFrame
+            Log.info("[onboarding] 菜单栏图标位置：\(anchor.map { "\($0)" } ?? "未取到（走降级布局）")")
+            self?.showOnboarding(markAsSeen: false)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            let visibleWindows = NSApp.windows.filter { $0.isVisible }.count
+            Log.info("[onboarding] isVisible=\(OnboardingOverlay.isVisible) 可见窗口数=\(visibleWindows)（期望 ≥ 屏幕数）")
+            OnboardingOverlay.dismiss()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
+            Log.info("[onboarding] 关闭后 isVisible=\(OnboardingOverlay.isVisible)（期望 false）"
+                + "，可见窗口数=\(NSApp.windows.filter { $0.isVisible }.count)")
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// `--smoke-bar`：顶栏热区回归自检。
+    /// 建一路 PiP → 开自动隐藏 → 指针移到顶栏热区（应完整可操作）→ 移到画面区域（应淡出并穿透）
+    /// → 移出浮窗（应完全恢复）。会短暂移动鼠标指针，跑完自动退出。
+    private func runTopBarRegression() {
+        Log.info("[bar] 开始顶栏热区回归自检")
+        var session: PiPSession?
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            SessionStore.shared.pipFrontmostWindow()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            session = SessionStore.shared.sessions.first
+            guard let session else {
+                Log.error("[bar] 没能建立会话")
+                NSApp.terminate(nil)
+                return
+            }
+            session.toggleAutoHide()
+            // 先等 3 秒说明提示过去，再把指针移进画面区域，确认淡出生效
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+                Self.warpMouse(to: CGPoint(x: session.debugWindowFrame.midX,
+                                           y: session.debugWindowFrame.minY + 20))
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 9) {
+            guard let session else { return }
+            Log.info("""
+                [bar] 画面区域：alpha=\(String(format: "%.2f", session.debugAlpha)) \
+                点击穿透=\(session.debugClickThrough)（期望淡出 + 穿透开启）
+                """)
+            guard let bar = session.debugBarScreenFrame else {
+                Log.error("[bar] 拿不到顶栏热区")
+                return
+            }
+            Log.info("[bar] 指针移到顶栏热区中心")
+            Self.warpMouse(to: CGPoint(x: bar.midX, y: bar.midY))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 11) {
+            guard let session else { return }
+            Log.info("""
+                [bar] 顶栏热区：alpha=\(String(format: "%.2f", session.debugAlpha)) \
+                点击穿透=\(session.debugClickThrough)（期望 alpha=1.00 + 穿透关闭）
+                """)
+            let frame = session.debugWindowFrame
+            Log.info("[bar] 指针移出浮窗")
+            Self.warpMouse(to: CGPoint(x: max(4, frame.minX - 80), y: frame.midY))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 13) {
+            guard let session else { return }
+            Log.info("""
+                [bar] 移出后：alpha=\(String(format: "%.2f", session.debugAlpha)) \
+                点击穿透=\(session.debugClickThrough)（期望 alpha=1.00 + 穿透关闭）
+                """)
+            SessionStore.shared.closeAll()
+            NSApp.terminate(nil)
+        }
     }
 
     /// `--smoke-autohide`：自动隐藏回归自检。
@@ -172,6 +261,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.onAutoHideOpacityChanged = { opacity in
             SessionStore.shared.applyAutoHideOpacity(opacity)
         }
+    }
+
+    /// 首启引导：LSUIElement 应用没有主窗口，必须明确告诉用户「已经在后台跑起来了，入口在菜单栏」。
+    /// 菜单栏图标刚创建时还没完成布局，拿不到位置就等一拍再试一次，尽量让箭头能指准。
+    private func showOnboarding(markAsSeen: Bool, retry: Bool = true) {
+        let anchor = statusBar?.statusItemScreenFrame
+        if anchor == nil, retry {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.showOnboarding(markAsSeen: markAsSeen, retry: false)
+            }
+            return
+        }
+        OnboardingOverlay.show(
+            anchor: anchor,
+            onOpenMenu: { [weak self] in
+                // 关闭引导后紧接着弹菜单，用户能立刻看到「选择窗口」
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    self?.statusBar?.openMenu()
+                }
+            },
+            onDismiss: {
+                if markAsSeen { Preferences.shared.hasSeenOnboarding = true }
+            }
+        )
     }
 
     private func observeSleepWake() {

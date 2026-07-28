@@ -96,6 +96,8 @@ final class Preferences {
         static let windowLevelMode = "windowLevelMode"
         static let launchAtLogin = "launchAtLogin"
         static let showsCursor = "showsCursor"
+        static let hasSeenOnboarding = "hasSeenOnboarding"
+        static let clickToActivateSource = "clickToActivateSource"
     }
 
     private init() {
@@ -107,6 +109,8 @@ final class Preferences {
             K.enhancedMode: false,
             K.windowLevelMode: WindowLevelMode.global.rawValue,
             K.showsCursor: false,
+            K.hasSeenOnboarding: false,
+            K.clickToActivateSource: true,
         ])
     }
 
@@ -173,6 +177,18 @@ final class Preferences {
     var showsCursor: Bool {
         get { d.bool(forKey: K.showsCursor) }
         set { d.set(newValue, forKey: K.showsCursor) }
+    }
+
+    /// 是否已经看过首次启动引导（LSUIElement 应用没有主窗口，首启需要明确告知用户去哪找）
+    var hasSeenOnboarding: Bool {
+        get { d.bool(forKey: K.hasSeenOnboarding) }
+        set { d.set(newValue, forKey: K.hasSeenOnboarding) }
+    }
+
+    /// 单击浮窗是否切换到源应用窗口
+    var clickToActivateSource: Bool {
+        get { d.bool(forKey: K.clickToActivateSource) }
+        set { d.set(newValue, forKey: K.clickToActivateSource) }
     }
 
     // MARK: - 热键

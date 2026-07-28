@@ -13,6 +13,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let store = SessionStore.shared
     private let prefs = Preferences.shared
 
+    /// 「显示上手引导」被点击（由 AppDelegate 接线到引导浮层）
+    var onShowOnboarding: (() -> Void)?
+
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
@@ -31,6 +34,25 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func setPendingUpdate(_ info: ReleaseInfo?) {
         pendingUpdate = info
         refreshIcon()
+    }
+
+    /// 菜单栏图标在屏幕坐标（AppKit 左下原点）下的 frame，供首启引导定位高亮孔。
+    /// 图标尚未完成布局时会拿到 (0, -14) 这类无效值，这里做合法性校验后返回 nil，
+    /// 由引导浮层走降级布局，避免箭头指到屏幕左下角。
+    var statusItemScreenFrame: CGRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        let inWindow = button.convert(button.bounds, to: nil)
+        let onScreen = window.convertToScreen(inWindow)
+        guard onScreen.width > 1, onScreen.height > 1 else { return nil }
+        // 菜单栏图标必然贴着某块屏幕的顶边
+        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(onScreen) }),
+              onScreen.maxY > screen.frame.maxY - 40 else { return nil }
+        return onScreen
+    }
+
+    /// 以程序方式展开状态栏菜单（引导浮层点「打开菜单」时用）。
+    func openMenu() {
+        statusItem.button?.performClick(nil)
     }
 
     // MARK: - 图标
@@ -167,6 +189,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        addItem(title: L.t("显示上手引导", "Show Getting Started"), hint: nil, symbol: "questionmark.circle",
+                action: #selector(showOnboarding))
         addItem(title: L.t("设置…", "Settings…"), hint: nil, symbol: "gearshape",
                 action: #selector(openSettings))
         addItem(title: L.t("检查更新…", "Check for Updates…"), hint: nil, symbol: "arrow.down.circle",
@@ -386,6 +410,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func closeAll() { store.closeAll() }
 
     @objc private func openSettings() { SettingsWindowController.shared.show() }
+
+    @objc private func showOnboarding() { onShowOnboarding?() }
 
     @objc private func checkUpdates() { Updater.checkInteractive() }
 
