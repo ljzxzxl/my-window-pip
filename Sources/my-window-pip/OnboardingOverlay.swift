@@ -595,8 +595,21 @@ private final class OnboardingCardView: NSView {
         let prefs = Preferences.shared
         let pipKeys = prefs.pipHotkey.displayString
         let regionKeys = prefs.regionHotkey.displayString
-        let shortcut = L.t("\(pipKeys) 画中画前台窗口　\(regionKeys) 区域捕获",
-                           "\(pipKeys) PiP the frontmost window　\(regionKeys) Capture a region")
+        // 第二行讲清楚「放大画面」这套手势：顶栏的「复位缩放」按钮只在放大后才可用，
+        // 不说明的话容易被误以为是坏的（它管的是画面倍率，不是浮窗尺寸）。
+        let shortcut = L.t(
+            """
+            \(pipKeys) 画中画前台窗口　\(regionKeys) 区域捕获
+            放大画面：按住 Cmd 拖拽框选，Cmd + 滚轮调倍率，Cmd + 双击复位。
+            顶栏的「复位缩放」只在放大后可用，它复位的是画面倍率，与浮窗大小无关。
+            """,
+            """
+            \(pipKeys) PiP the frontmost window　\(regionKeys) Capture a region
+            Zoom in: Cmd-drag to select an area, Cmd-scroll to adjust, Cmd-double-click to reset.
+            The top bar's "Reset zoom" only lights up once zoomed — it resets the zoom factor, \
+            not the window size.
+            """
+        )
 
         configure(titleLabel, text: title, font: titleFont, color: .labelColor, width: contentWidth)
         configure(bodyLabel, text: body, font: bodyFont, color: .labelColor, width: contentWidth)
