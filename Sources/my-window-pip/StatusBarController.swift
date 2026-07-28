@@ -97,7 +97,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func rebuildMenu() {
         menu.removeAllItems()
 
-        if let update = pendingUpdate {
+        if Updater.isDownloading {
+            let percent = Updater.downloadPercent.map { "\($0)%" } ?? "…"
+            let item = NSMenuItem(
+                title: L.t("正在下载更新 \(percent)", "Downloading update \(percent)"),
+                action: nil, keyEquivalent: ""
+            )
+            item.isEnabled = false
+            item.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+            menu.addItem(item)
+            menu.addItem(.separator())
+        } else if let update = pendingUpdate {
             let item = NSMenuItem(
                 title: L.t("发现新版本 \(update.version)", "Version \(update.version) available"),
                 action: #selector(showUpdate), keyEquivalent: ""

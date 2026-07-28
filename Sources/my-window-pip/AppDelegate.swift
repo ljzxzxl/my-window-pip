@@ -48,6 +48,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--smoke-autohide") { runAutoHideRegression() }
         if CommandLine.arguments.contains("--smoke-bar") { runTopBarRegression() }
         if CommandLine.arguments.contains("--smoke-onboarding") { runOnboardingRegression() }
+        if CommandLine.arguments.contains("--smoke-update") { runUpdateRegression() }
+    }
+
+    /// `--smoke-update`：更新链路回归自检。
+    /// 查 Release → 下载 DMG（每 10% 打印进度）→ SHA256 校验 → 打印结果后删除文件退出。
+    /// 用来验证慢链路下的超时配置与校验逻辑，不会挂载 DMG、不会弹任何窗口。
+    private func runUpdateRegression() {
+        Log.info("[update] 下载会话配置：\(Updater.downloadSessionDescription)")
+        let started = Date()
+
+        Updater.fetchLatest { result in
+            switch result {
+            case let .failure(error):
+                Log.error("[update] 查询 Release 失败：\(Updater.describe(error))")
+                exit(2)
+            case let .success(info):
+                Log.info("[update] 最新版本 \(info.version)（当前 \(Updater.currentVersion)）"
+                    + " dmg=\(info.dmgURL?.lastPathComponent ?? "nil")"
+                    + " sha256=\(info.sha256URL?.lastPathComponent ?? "nil")")
+                guard info.dmgURL != nil else {
+                    Log.error("[update] Release 里没有 DMG 资产")
+                    exit(3)
+                }
+                Self.runUpdateDownloadProbe(info, started: started)
+            }
+        }
+    }
+
+    private static func runUpdateDownloadProbe(_ info: ReleaseInfo, started: Date) {
+        var lastBucket = -1
+        Updater.startDownloadForProbe(
+            info,
+            onProgress: { written, total in
+                guard total > 0 else { return }
+                let bucket = Int(Double(written) / Double(total) * 10)
+                guard bucket != lastBucket else { return }
+                lastBucket = bucket
+                let elapsed = String(format: "%.1f", Date().timeIntervalSince(started))
+                Log.info("[update] 进度 \(bucket * 10)%（\(written)/\(total) 字节，\(elapsed)s）")
+            },
+            onFinished: { result in
+                let elapsed = String(format: "%.1f", Date().timeIntervalSince(started))
+                switch result {
+                case let .failure(error):
+                    Log.error("[update] 下载失败（\(elapsed)s）：\(Updater.describe(error))")
+                    exit(4)
+                case let .success(file):
+                    Log.info("[update] 下载完成（\(elapsed)s）：\(file.path)")
+                    guard let shaURL = info.sha256URL else {
+                        Log.warn("[update] 无 .sha256 资产，跳过校验")
+                        try? FileManager.default.removeItem(at: file)
+                        Log.info("[update] 自检通过（未校验）")
+                        exit(0)
+                    }
+                    URLSession.shared.dataTask(with: shaURL) { data, _, _ in
+                        let expected = data.flatMap { String(data: $0, encoding: .utf8) }?
+                            .split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init)?
+                            .lowercased() ?? ""
+                        let actual = ((try? Updater.sha256(ofFileAt: file)) ?? "").lowercased()
+                        Log.info("[update] SHA256 期望=\(expected.prefix(16))… 实际=\(actual.prefix(16))…")
+                        try? FileManager.default.removeItem(at: file)
+                        if !expected.isEmpty, expected == actual {
+                            Log.info("[update] 自检通过：下载 + 校验均正常")
+                            exit(0)
+                        } else {
+                            Log.error("[update] SHA256 校验失败")
+                            exit(5)
+                        }
+                    }.resume()
+                }
+            }
+        )
     }
 
     /// `--smoke-onboarding`：首启引导回归自检。展示引导 → 断言窗口已出现 → 关闭 → 断言已清理。
@@ -223,6 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        Updater.cancelDownload()
         SessionStore.shared.closeAll()
         EventTapManager.shared.disable()
         HotkeyManager.shared.unregisterAll()

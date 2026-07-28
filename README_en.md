@@ -37,7 +37,7 @@ It uses the system [ScreenCaptureKit](https://developer.apple.com/documentation/
 - The right-click menu exposes every action, so the app is fully usable without extra permissions
 - Every entry under "Active PiP" in the menu bar has a submenu: bring to front / pause / auto-hide / idle detection / opacity / frame rate / close
 - Source minimized → placeholder and automatic resume; source closed → notice, then auto-close; source app relaunched → reconnect by app + title
-- Update check via GitHub Releases
+- Update check via GitHub Releases: downloads show a progress panel you can watch or cancel, the DMG is verified against the published SHA256, and on slow connections you can retry or switch to your browser with one click
 
 ## Shortcuts
 

@@ -47,6 +47,7 @@ bash scripts/build-app.sh --fast --debug     # 开发期快速构建（单架构
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-autohide        # 自动隐藏淡出/恢复回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-bar             # 顶栏热区回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding      # 首启引导浮层回归
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update          # 更新链路回归（真实下载 + SHA256 校验）
 bash scripts/reset-permission.sh             # 重建后重置 TCC 记录
 ```
 
@@ -80,4 +81,5 @@ swiftc -typecheck -target x86_64-apple-macos14.0 \
 - 热键没反应：`HotkeyManager.failedActions` 非空说明被别的应用占用，设置页会提示；`fn` 组合键必须开增强模式。
 - 增强模式突然失灵：系统会在负载高时禁用事件监听，`EventTapManager` 已监听 `tapDisabledByTimeout` 自动恢复，日志里能看到告警。
 - 系统设置的「屏幕录制」列表里没有本应用：说明启动路径没走 `Permissions.ensureScreenRecording()`（它内部会先 `CGRequestScreenCaptureAccess()` 再补一次 `SCShareableContent` 探测，TCC 只有被真正请求过才会建条目）。
-- 浮窗淡出后点不到任何东西：这是点击穿透的预期行为，按住 ⌥ 临时唤回，或从菜单栏该浮窗的子菜单关掉自动隐藏。
+- 浮窗淡出后点不到任何东西：这是点击穿透的预期行为，按住 ⌥ 临时唤回、或把鼠标停在顶栏热区，也可从菜单栏该浮窗的子菜单关掉自动隐藏。
+- 更新下载失败：先跑 `--smoke-update` 看是网络还是逻辑问题。**踩过的坑**：`URLSession.shared` 默认空闲超时只有 60 秒，而本机拉 GitHub 的 1.9 MB DMG 实测要 80 秒以上，于是必定超时。现在 `Updater` 用专用会话（空闲 120s / 整体 1800s / `waitsForConnectivity`），下载走 `URLSessionDownloadDelegate` 以便上报进度；临时文件必须在 `didFinishDownloadingTo` 里**同步**搬走，否则回调返回后就被系统删了。
