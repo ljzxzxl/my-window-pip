@@ -57,7 +57,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 
 **Interaction**
 - A dimmed overlay with an arrow points at the menu bar icon on first launch, so it is obvious the app is running in the background; replay it any time from *Show Getting Started*.
-- Click a PiP window to switch straight to its source app (optional); with Accessibility granted it also raises that specific window.
+- Click a PiP window to switch straight to its source app (optional); with Accessibility granted it identifies the source by window ID and raises that exact window. PiP titles follow source title changes automatically.
 - Auto-hide with click-through: the window fades out and pauses when the pointer moves over it — but the **top bar stays usable**: rest the pointer on the bar and the window returns to full opacity so you can click buttons, drag it by the bar, or open the right-click menu, while the video area stays click-through.
 - While faded you can also hold `⌥` to peek at the whole window, or turn auto-hide off from the window's menu bar submenu. The faded opacity is configurable in 5% steps (default 35%).
 - Hover overlay controls: pause, frame rate, reset zoom, auto-hide, idle detection, close. Icons highlight on hover and the description appears instantly above the icon.
@@ -86,7 +86,7 @@ Enhanced mode (optional, requires Accessibility) adds `fn`+`P` / `fn`+`⇧`+`P` 
 | Permission | Required | Purpose |
 |---|---|---|
 | Screen & System Audio Recording | **yes** | ScreenCaptureKit window capture |
-| Accessibility | optional | enhanced mode only (fn hotkeys, hover keys) |
+| Accessibility | optional | exact source-window switching; Enhanced mode (fn hotkeys, hover keys) |
 
 The system prompt appears on first launch and the app registers itself under *System Settings → Privacy & Security → Screen & System Audio Recording*, so you just flip the switch — no need to add it manually with the "+" button. macOS only applies the grant after a restart; the guide dialog has a "Relaunch app" button for that.
 
@@ -202,7 +202,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 
 **交互**
 - 首次启动有一层遮罩 + 箭头引导指向菜单栏图标，明确告知「应用已在后台运行、入口在这里」；之后可从菜单栏「显示上手引导」重看。
-- 单击浮窗直接切回源应用窗口（可关闭）；已授予辅助功能权限时会连那个具体窗口一起抬到最前。
+- 单击浮窗直接切回源应用窗口（可关闭）；已授予辅助功能权限时会按窗口 ID 精确抬起对应窗口。浮窗标题会自动跟随源窗口标题变化。
 - 自动隐藏 + 点击穿透：鼠标移上去浮窗淡出并暂停，可直接操作背后的内容；此时**顶栏仍然可用**——鼠标停在顶栏范围内浮窗就会恢复不透明，可以点按钮、按住顶栏拖动窗口、调出右键菜单，画面区域依旧穿透。
 - 淡出后也可以按住 `⌥` 临时唤回整窗，或在菜单栏的浮窗子菜单里关掉自动隐藏。淡出透明度可调，5% 一档（默认 35%）。
 - 悬停浮出控制条：暂停、帧率、复位缩放、自动隐藏、静止检测、关闭；图标有悬停高亮，说明文字立刻显示在图标上方。
@@ -231,7 +231,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 | 权限 | 是否必需 | 用途 |
 |---|---|---|
 | 屏幕录制与系统录音 | **必需** | ScreenCaptureKit 捕获窗口画面 |
-| 辅助功能 | 可选 | 仅增强模式（fn 组合键、悬停按键）需要 |
+| 辅助功能 | 可选 | 精确切换到源窗口；增强模式（fn 组合键、悬停按键） |
 
 首次启动会弹出系统的屏幕录制授权框，本应用会自动出现在「系统设置 → 隐私与安全性 → 屏幕录制与系统录音」列表里，**直接打开开关即可，不需要手动点加号添加**。macOS 要求授权后重启应用才生效，引导框里有「重新启动应用」按钮。
 
@@ -314,7 +314,7 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 ### 说明
 
 - 需要 macOS 14+：为了用 `SCStream.updateConfiguration` 平滑改帧率/分辨率/裁剪，不做 12.3–13 的兼容分支。
-- `fn` 组合键与「悬停按键」必须走事件监听，所以只放在需要辅助功能权限的增强模式里；其余功能只靠屏幕录制权限就能全用。
+- `fn` 组合键、「悬停按键」与精确切换到具体源窗口需要辅助功能权限；未授权时，单击浮窗仍会激活源应用，但由应用决定显示哪个窗口。
 - 源窗口最小化时系统不再产出画面，只能显示占位并等待恢复（这是 macOS 的限制，不是 bug）。
 - 顶栏的「复位缩放」指的是**画面放大倍率**，与浮窗窗口大小无关；没有用 `Cmd` 拖拽或 `Cmd` 滚轮放大过画面时它是灰色不可用的。
 - 登录自启动依赖 `SMAppService`，ad-hoc 签名下可能失败，失败时会提示改用系统设置手动添加。

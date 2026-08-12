@@ -894,7 +894,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         contextMenu.addItem(idleItem)
 
         // 单击回源开关（全局偏好，勾选态在 refreshMenu 里刷新）
-        clickActivateItem.title = L.t("单击浮窗切换到源应用", "Click to switch to source app")
+        clickActivateItem.title = L.t("单击浮窗切换到源窗口", "Click to switch to source window")
         clickActivateItem.target = self
         clickActivateItem.action = #selector(menuToggleClickToActivate)
         contextMenu.addItem(clickActivateItem)

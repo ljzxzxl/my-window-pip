@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import CoreMedia
 import ScreenCaptureKit
 
@@ -34,6 +33,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private var probeTimer: Timer?
     private var hiddenAutoCloseTimer: Timer?
     private var occlusionObserver: NSObjectProtocol?
+    private var didExplainApplicationOnlyActivation = false
     private var isClosed = false
 
     private static let hiddenAutoCloseSeconds: TimeInterval = 60
@@ -102,6 +102,20 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     func bringToFront() { windowController.bringToFront() }
     func flashHighlight() { windowController.flashHighlight() }
+
+    /// ScreenCaptureKit 帧不携带窗口元数据；由 `SessionStore` 的共享低频刷新更新可变标题，
+    /// `CGWindowID` 身份保持不变。
+    func refreshSourceTitle(_ title: String) {
+        guard !isClosed,
+              case let .window(windowID, bundleID, appName, oldTitle) = state.source else { return }
+        let refreshed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !refreshed.isEmpty, refreshed != oldTitle else { return }
+        state.source = .window(
+            id: windowID, bundleID: bundleID, appName: appName, title: refreshed
+        )
+        windowController.setTitle(state.source.displayTitle)
+        Log.debug("源窗口标题已更新：\(state.source.displayTitle)")
+    }
 
     /// 仅用于 `--smoke` 集成自检的调试信息
     var debugWindowFrame: CGRect { windowController.window.frame }
@@ -625,7 +639,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         Preferences.shared.clickToActivateSource.toggle()
         let on = Preferences.shared.clickToActivateSource
         windowController.showHint(
-            on ? L.t("单击浮窗将切换到源应用", "Click the PiP to switch to the source app")
+            on ? L.t("单击浮窗将切换到源窗口", "Click the PiP to switch to the source window")
                : L.t("已关闭「单击回源」", "Click-to-switch is off"),
             near: nil, duration: 2.0
         )
@@ -636,8 +650,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     /// 单击浮窗 → 切换到源应用窗口。
     ///
-    /// 零权限路径只能激活「应用」；已授予辅助功能权限时再用 AX 把**那个具体窗口**抬到最前
-    /// （只读 `AXIsProcessTrusted()`，未授权直接跳过，绝不弹权限框）。
+    /// 零权限路径只能激活「应用」；已授予辅助功能权限时按 `CGWindowID` 把具体窗口抬到最前。
     func activateSource() {
         guard !isClosed else { return }
         guard Preferences.shared.clickToActivateSource else {
@@ -649,20 +662,49 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         case let .window(windowID, bundleID, appName, title):
             var pid = ShareableContentStore.shared.cachedWindow(id: windowID)?
                 .owningApplication?.processID
+                ?? SourceWindowActivator.ownerPID(of: windowID)
             if pid == nil, let bundleID, !bundleID.isEmpty {
                 pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
                     .first?.processIdentifier
             }
-            guard let pid, let app = NSRunningApplication(processIdentifier: pid) else {
+            guard let pid else {
                 windowController.showHint(
                     L.t("源应用似乎已退出", "The source app seems to have quit"),
                     near: nil, duration: 2.0
                 )
                 return
             }
-            _ = app.activate()
-            raiseWindowViaAccessibility(pid: pid, title: title)
-            Log.debug("单击回源：\(appName)")
+            switch SourceWindowActivator.activate(
+                windowID: windowID, pid: pid, fallbackTitle: title
+            ) {
+            case .raised:
+                Log.debug("单击回源：\(appName) [windowID=\(windowID)]")
+            case .applicationOnly:
+                if !didExplainApplicationOnlyActivation {
+                    didExplainApplicationOnlyActivation = true
+                    windowController.showHint(
+                        L.t("授予辅助功能权限后可精确切换到这个窗口",
+                            "Grant Accessibility to switch to this exact window"),
+                        near: nil, duration: 3.0
+                    )
+                }
+            case .windowNotFound:
+                windowController.showHint(
+                    L.t("无法定位对应的源窗口", "Could not locate the matching source window"),
+                    near: nil, duration: 2.0
+                )
+                Log.warn("单击回源未找到 AX 窗口：\(appName) [windowID=\(windowID)]")
+            case .activationFailed:
+                windowController.showHint(
+                    L.t("无法切换到源窗口", "Could not activate the source window"),
+                    near: nil, duration: 2.0
+                )
+            case .applicationNotFound:
+                windowController.showHint(
+                    L.t("源应用似乎已退出", "The source app seems to have quit"),
+                    near: nil, duration: 2.0
+                )
+            }
 
         case .region:
             windowController.showHint(
@@ -671,26 +713,6 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 near: nil, duration: 2.0
             )
         }
-    }
-
-    private func raiseWindowViaAccessibility(pid: pid_t, title: String) {
-        guard Permissions.hasAccessibility else { return }
-        let app = AXUIElementCreateApplication(pid)
-        var raw: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &raw) == .success,
-              let windows = raw as? [AXUIElement], !windows.isEmpty else { return }
-
-        let wanted = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let target = windows.first { window in
-            var titleRef: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString,
-                                                &titleRef) == .success,
-                  let text = titleRef as? String else { return false }
-            return text == wanted
-        } ?? windows[0]
-
-        AXUIElementPerformAction(target, kAXRaiseAction as CFString)
-        AXUIElementSetAttributeValue(app, kAXFocusedWindowAttribute as CFString, target)
     }
 
     func pipDidMove() {

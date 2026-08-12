@@ -103,29 +103,33 @@ enum Permissions {
         }
     }
 
-    // MARK: - 辅助功能（增强模式）
+    // MARK: - 辅助功能（精确回源 / 增强模式）
 
     static var hasAccessibility: Bool { AXIsProcessTrusted() }
 
     static func showAccessibilityGuide() {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = L.t("增强模式需要「辅助功能」权限", "Enhanced mode requires Accessibility")
+        alert.messageText = L.t("这些功能需要「辅助功能」权限", "These features require Accessibility")
         alert.informativeText = L.t(
             """
-            增强模式用于支持 fn 组合热键，以及鼠标悬停在浮窗上时的快捷键（= - F D fn ⌫）。
+            「辅助功能」权限用于：
+            · 单击浮窗时切换到对应的具体源窗口
+            · 增强模式的 fn 组合热键与悬停快捷键（= - F D fn ⌫）
 
             请在「系统设置 → 隐私与安全性 → 辅助功能」中勾选 MyWindowPip。
 
-            不开启增强模式也能正常使用：默认热键为 ⌃⌥P，浮窗操作可用悬浮按钮与右键菜单。
+            未授权时仍可正常捕获；单击浮窗只能激活源应用，由应用决定显示哪个窗口。
             """,
             """
-            Enhanced mode enables fn-based hotkeys and hover keyboard shortcuts (= - F D fn ⌫).
+            Accessibility is used to:
+            · Switch to the exact source window when a PiP is clicked
+            · Enable fn-based hotkeys and hover shortcuts (= - F D fn ⌫) in Enhanced mode
 
             Enable MyWindowPip in System Settings → Privacy & Security → Accessibility.
 
-            The app works fine without it: the default hotkey is ⌃⌥P and every action is available \
-            from the overlay buttons and right-click menu.
+            Capture still works without it; clicking a PiP can only activate the source application, \
+            which then chooses which window to show.
             """
         )
         alert.addButton(withTitle: L.t("打开系统设置", "Open System Settings"))
