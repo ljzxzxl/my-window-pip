@@ -106,7 +106,7 @@ openssl base64 -A -in signing.p12 | pbcopy   # → SIGNING_CERT_P12_BASE64
                                              # p12 密码 → SIGNING_CERT_PASSWORD
 ```
 
-风险提示：**`.p12` 与密码必须离线备份**。证书丢失或更换意味着 requirement 变化，所有用户都要重新授权一次（届时让他们点权限引导框里的「重置授权记录」）。自签证书不解决 Gatekeeper 首次拦截，那需要 Developer ID + 公证。
+风险提示：**`.p12` 与密码必须离线备份**。本机的那份放在仓库根目录的 `signing-cert.local/`（含 `.p12`、cert.pem、p12 密码、keychain 密码、base64），已由 `.gitignore` 排除，**不要提交**；它是唯一一份，删仓库目录前先另存一份到别处。证书丢失或更换意味着 requirement 变化，所有用户都要重新授权一次（届时让他们点权限引导框里的「重置授权记录」）。自签证书不解决 Gatekeeper 首次拦截，那需要 Developer ID + 公证。
 
 验证签名是否达标：
 

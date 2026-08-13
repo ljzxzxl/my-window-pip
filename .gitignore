@@ -6,3 +6,6 @@ dist/
 ._*
 .comate
 *.bak
+# 发布签名证书（.p12 + 密码），绝不能提交
+signing-cert.local/
+*.p12
