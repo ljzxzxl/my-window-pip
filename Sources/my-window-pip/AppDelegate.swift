@@ -50,6 +50,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--smoke-onboarding") { runOnboardingRegression() }
         if CommandLine.arguments.contains("--smoke-update") { runUpdateRegression() }
         if CommandLine.arguments.contains("--smoke-activate") { runActivateRegression() }
+        if CommandLine.arguments.contains("--smoke-mc") { runMissionControlRegression() }
+    }
+
+    /// `--smoke-mc`：调度中心回归自检。
+    /// 建一路 PiP → 记录基准矩形 → 真实开启调度中心 → 期间强制探测一次（这是 bug 的触发点）
+    /// → 断言基准矩形没有被总览变换污染 → 退出调度中心 → 再断言一次。会短暂开合调度中心。
+    private func runMissionControlRegression() {
+        Log.info("[mc] 开始调度中心回归自检")
+        var session: PiPSession?
+        var initial = CGRect.zero
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            SessionStore.shared.pipFrontmostWindow()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            session = SessionStore.shared.sessions.first
+            guard let session else {
+                Log.error("[mc] 没能建立会话")
+                NSApp.terminate(nil)
+                return
+            }
+            initial = session.debugBaseRect
+            Log.info("""
+                [mc] 初始 baseRect=\(Int(initial.width))×\(Int(initial.height)) \
+                sourceRect=\(Self.describe(session.debugSourceRect))（zoom=1 期望 .zero）
+                """)
+            Log.info("[mc] 开启调度中心")
+            Self.toggleMissionControl()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            guard let session else { return }
+            Log.info("[mc] 调度中心开着，强制探测一次源窗口")
+            session.debugProbeNow()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            guard let session else { return }
+            let now = session.debugBaseRect
+            let ok = abs(now.width - initial.width) < 1 && abs(now.height - initial.height) < 1
+            Log.info("""
+                [mc] 探测后 baseRect=\(Int(now.width))×\(Int(now.height)) \
+                \(ok ? "未被污染（期望）" : "已被总览变换污染（回归失败）")
+                """)
+            Log.info("[mc] 退出调度中心")
+            Self.toggleMissionControl()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
+            guard let session else { return }
+            let now = session.debugBaseRect
+            let ok = abs(now.width - initial.width) < 1 && abs(now.height - initial.height) < 1
+            Log.info("""
+                [mc] 退出后 baseRect=\(Int(now.width))×\(Int(now.height)) \
+                sourceRect=\(Self.describe(session.debugSourceRect)) \(ok ? "一致（期望）" : "不一致（回归失败）")
+                """)
+            SessionStore.shared.closeAll()
+            NSApp.terminate(nil)
+        }
+    }
+
+    private static func describe(_ rect: CGRect) -> String {
+        rect == .zero ? ".zero（整窗）" : "\(Int(rect.width))×\(Int(rect.height))@(\(Int(rect.minX)),\(Int(rect.minY)))"
+    }
+
+    /// 开合调度中心：`open -a "Mission Control"` 是开关式的，调用两次即开又关。
+    private static func toggleMissionControl() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Mission Control"]
+        do { try process.run() } catch { Log.error("[mc] 无法触发调度中心：\(error)") }
     }
 
     /// `--smoke-activate`：精确回源与标题按需刷新回归自检。

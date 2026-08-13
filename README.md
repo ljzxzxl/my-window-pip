@@ -150,6 +150,7 @@ Built-in self-tests (no UI, useful after any change):
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-bar        # top-bar hot zone
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding # first-launch overlay
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # exact source window + on-demand title
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc         # Mission Control geometry regression
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # real download + SHA256 check
 ```
 
@@ -172,6 +173,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 - Requires macOS 14+ so that `SCStream.updateConfiguration` can retune frame rate, resolution and crop smoothly; there is no 12.3–13 compatibility path.
 - `fn` combinations and hover keys need an event tap, so they live in the optional Accessibility-gated enhanced mode. Everything else works with Screen Recording alone.
 - While a source window is minimized the system produces no frames, so a placeholder is shown until it comes back — a macOS limitation, not a bug. Clicking the PiP un-minimizes the source window when Accessibility is granted.
+- While Mission Control is open macOS scales every window down, so the PiP picture may briefly shrink; it returns to the full window as soon as you leave the overview.
 - "Reset zoom" in the top bar refers to the **content zoom factor**, not the window size; it stays disabled until you zoom in with `Cmd`-drag or `Cmd`-scroll.
 - Launch at login uses `SMAppService`, which can fail for ad-hoc signed apps; the app then points you to System Settings.
 - Not implemented yet: audio follow, image filters such as contrast enhancement, and command-line control of a running instance. Hooks for all three are already in place.
@@ -296,6 +298,7 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-bar        # 顶栏热区
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding # 首启引导浮层
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # 精确回源窗口 + 标题按需刷新
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc         # 调度中心几何污染回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # 真实下载 + SHA256 校验
 ```
 
@@ -318,6 +321,7 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 - 需要 macOS 14+：为了用 `SCStream.updateConfiguration` 平滑改帧率/分辨率/裁剪，不做 12.3–13 的兼容分支。
 - `fn` 组合键、「悬停按键」与精确切换到具体源窗口需要辅助功能权限；未授权时，单击浮窗仍会激活源应用，但由应用决定显示哪个窗口。
 - 源窗口最小化时系统不再产出画面，只能显示占位并等待恢复（这是 macOS 的限制，不是 bug）；已授予辅助功能权限时，单击浮窗会把最小化的源窗口恢复出来。
+- 调度中心（Mission Control）打开时 macOS 会把所有窗口等比缩小，浮窗画面可能暂时缩小；退出总览即恢复成完整窗口。
 - 顶栏的「复位缩放」指的是**画面放大倍率**，与浮窗窗口大小无关；没有用 `Cmd` 拖拽或 `Cmd` 滚轮放大过画面时它是灰色不可用的。
 - 登录自启动依赖 `SMAppService`，ad-hoc 签名下可能失败，失败时会提示改用系统设置手动添加。
 - 暂未实现：音频跟随、增强对比度等画面滤镜、命令行控制已运行实例。三者的架构挂点都已预留。

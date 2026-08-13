@@ -111,6 +111,28 @@ enum SourceWindowActivator {
         return exactWindow(id: windowID, in: windows) != nil
     }
 
+    /// 读取指定窗口的 AX 尺寸。
+    ///
+    /// 用途：调度中心 / Exposé 期间 `SCWindow.frame` 报的是被总览变换过的矩形，而 AX 读到的
+    /// 仍是窗口自己的真实尺寸（实测总览中 SCWindow=1092×555 而 AX=1600×813），所以拿它做权威
+    /// 校验。未授予辅助功能权限时返回 nil，调用方退回签名判定，不弹任何权限框。
+    static func currentSize(of windowID: CGWindowID) -> CGSize? {
+        guard Permissions.hasAccessibility,
+              let number = windowInfo(of: windowID)?[kCGWindowOwnerPID as String] as? NSNumber
+        else { return nil }
+        let app = appElement(pid_t(number.int32Value))
+        guard let windows = windows(of: app),
+              let target = exactWindow(id: windowID, in: windows) else { return nil }
+
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            target, kAXSizeAttribute as CFString, &raw
+        ) == .success, let value = raw, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var size = CGSize.zero
+        guard AXValueGetValue(value as! AXValue, .cgSize, &size) else { return nil }
+        return size
+    }
+
     /// 读取指定窗口的实时 AX 标题。Electron 等应用的 CGWindowName 可能不会随文档切换及时更新。
     static func currentTitle(of windowID: CGWindowID, pid: pid_t) -> String? {
         guard Permissions.hasAccessibility else { return nil }

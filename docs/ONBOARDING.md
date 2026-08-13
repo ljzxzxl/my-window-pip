@@ -38,6 +38,8 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **双语**：用户可见字符串一律 `L.t("中文", "English")`，不引入 `.lproj`。
 - **AX 调用一律带超时**：`AXUIElementCopyAttributeValue` 等是同步 IPC，会打到目标进程主线程，源 App 卡死时会连带冻住我们的主线程。AX 访问集中在 `SourceWindowActivator`，元素统一由内部的 `appElement(_:)` 创建（已 `AXUIElementSetMessagingTimeout(0.5)`）；不要在别处直接 `AXUIElementCreateApplication`。
 - **窗口元数据只按需取，不做常驻轮询**：SCK 帧只有像素、不带标题。源窗口标题只在悬停浮出的顶栏与菜单里可见，所以刷新时机固定为三处——`handleHover` 的悬停上升沿、`PiPWindowController.menuNeedsUpdate`（经 `pipMenuWillOpen`）、`StatusBarController.menuWillOpen`（经 `SessionStore.refreshSourceTitles()`），每会话 0.5 秒节流。实测全量 `CGWindowListCopyWindowInfo(.optionAll)` 单次 2.0ms、单会话 AX 标题往返 1.6ms，2 秒轮询 3 路会话≈0.35% CPU 常驻，和 1fps 捕获同量级，不值得。
+- **总览期间的窗口 frame 不可信**：调度中心 / Exposé 打开时 WindowServer 会把窗口等比缩小并内移，`SCWindow.frame` 与 `CGWindowListCopyWindowInfo` 的 bounds 报的都是**变换后**的矩形，而 `isOnScreen` 仍是 true（实测 1600×813 → 1092×555@(102,102)），AX 的 `kAXSize` 则不受影响。任何「按窗口尺寸更新几何」的代码都必须走 `Geo.trustedSourceSize(sampled:current:axSize:)`：有辅助功能权限时以 AX 为权威，没有权限时靠「两轴等比缩小」签名拒绝脏值。历史 bug 就是探测器在总览期间把裁剪框改小，退出后画面永久停在源窗口左上角局部放大。
+- **zoom = 1 时不下发 `sourceRect`**：整窗且未放大时把 `sourceRect` 留成 `.zero`（SCK 语义 = 整个 filter 内容），既让画面天然跟随源窗口尺寸变化，也让几何采样出错时最坏只影响宽高比，不会裁歪画面。窗口内区域捕获与显示器区域捕获仍走显式裁剪。恢复流之后还有一次 1.2 秒的延时几何校正（要大于 `ShareableContentStore` 的 1 秒 TTL 才能拿到新采样）。
 - **精确回源靠私有符号**：AX 没有公开的 `CGWindowID` 属性，`SourceWindowActivator` 用 `dlsym` 动态解析 `_AXUIElementGetWindow`。解析失败会打一条 `Log.warn` 并退到「标题唯一匹配」——同名窗口不唯一时绝不猜（历史 bug 就是回退到 `windows[0]` 抬错窗口）。`--smoke-activate` 会断言符号可用且能反查到捕获中的窗口。
 
 ## 常用命令
@@ -51,6 +53,7 @@ bash scripts/build-app.sh --fast --debug     # 开发期快速构建（单架构
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-bar             # 顶栏热区回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding      # 首启引导浮层回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate        # 精确回源窗口 + 标题按需刷新回归
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc              # 调度中心几何污染回归（会开合调度中心）
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update          # 更新链路回归（真实下载 + SHA256 校验）
 bash scripts/reset-permission.sh             # 重建后重置 TCC 记录
 ```

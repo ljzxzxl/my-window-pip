@@ -69,6 +69,35 @@ enum Geo {
                                    y: pointerNorm.y - dy * ratio), zoom: nz)
     }
 
+    // MARK: - 源尺寸可信度
+
+    /// 判定「刚采样到的源窗口尺寸」能不能当作真实尺寸采纳。
+    ///
+    /// 调度中心 / Exposé 期间 WindowServer 会把所有窗口等比缩小并内移，此时 `SCWindow.frame`
+    /// 与 `CGWindowListCopyWindowInfo` 的 bounds 报的都是**变换后**的矩形，而 `isOnScreen` 仍为
+    /// true（实测 1600×813 → 1092×555@(102,102)）。照抄这个值会把捕获裁剪框改小，退出总览后
+    /// 画面就永久停在「源窗口左上角局部放大」。
+    ///
+    /// - Parameters:
+    ///   - sampled: 本次从 SCK / CGWindowList 采样到的尺寸
+    ///   - current: 当前正在用的基准矩形
+    ///   - axSize: 辅助功能读到的窗口尺寸（不受总览变换影响；无权限时传 nil）
+    /// - Returns: 可采纳的尺寸；判定为总览变换时返回 nil（调用方应保持原值）
+    static func trustedSourceSize(sampled: CGSize, current: CGRect, axSize: CGSize?) -> CGSize? {
+        guard sampled.width > 1, sampled.height > 1 else { return nil }
+        // 有辅助功能权限时 AX 是权威值：与采样值冲突说明采样值被变换过
+        if let ax = axSize, ax.width > 1, ax.height > 1 {
+            let differs = abs(ax.width - sampled.width) > 1 || abs(ax.height - sampled.height) > 1
+            return differs ? ax : sampled
+        }
+        // 无权限时只能认签名：总览变换一定是两轴同比例缩小
+        guard current.width > 1, current.height > 1 else { return sampled }
+        let sx = sampled.width / current.width
+        let sy = sampled.height / current.height
+        let uniformShrink = sx < 0.995 && abs(sx - sy) < 0.01
+        return uniformShrink ? nil : sampled
+    }
+
     // MARK: - 视图 ↔ 源坐标
 
     /// `videoGravity = .resizeAspect` 下，内容在视图内实际占据的矩形（视图坐标，左下原点）。
@@ -209,6 +238,24 @@ enum Geo {
         // 内容矩形（16:9 塞进 4:3 视图应上下留边）
         let c = contentRect(aspect: CGSize(width: 16, height: 9), in: CGRect(x: 0, y: 0, width: 400, height: 400))
         assert(abs(c.width - 400) < 0.001 && c.height < 400, "contentRect 计算错误")
+
+        // 源尺寸可信度：调度中心的等比缩小要判不可信
+        let base = CGRect(x: 0, y: 0, width: 1600, height: 813)
+        assert(trustedSourceSize(sampled: CGSize(width: 1092, height: 555),
+                                 current: base, axSize: nil) == nil,
+               "等比缩小应判为总览变换")
+        // 单轴改尺寸是真实的用户拖拽，应采纳
+        assert(trustedSourceSize(sampled: CGSize(width: 1200, height: 813),
+                                 current: base, axSize: nil) != nil,
+               "单轴改尺寸应采纳")
+        // AX 与采样冲突时以 AX 为准
+        let picked = trustedSourceSize(sampled: CGSize(width: 1092, height: 555), current: base,
+                                       axSize: CGSize(width: 1600, height: 813))
+        assert(picked?.width == 1600, "AX 与采样冲突时应采纳 AX")
+        // current 非法（会话刚建立）时不该拦住采样值
+        assert(trustedSourceSize(sampled: CGSize(width: 800, height: 600),
+                                 current: .zero, axSize: nil) != nil,
+               "current 非法时应直接采纳采样值")
 
         Log.debug("Geo 自检通过")
     }

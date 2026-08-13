@@ -31,6 +31,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private var reconnectAttempt = 0
     private var reconnectWork: DispatchWorkItem?
     private var probeTimer: Timer?
+    private var geometryRecheckWork: DispatchWorkItem?
     private var hiddenAutoCloseTimer: Timer?
     private var occlusionObserver: NSObjectProtocol?
     private var didExplainApplicationOnlyActivation = false
@@ -42,6 +43,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     private static let hiddenAutoCloseSeconds: TimeInterval = 60
     private static let maxReconnectAttempts = 3
+    /// 恢复后再确认一次几何的延时（要大于 `ShareableContentStore` 的 1 秒 TTL）
+    private static let geometryRecheckDelay: TimeInterval = 1.2
     /// 标题按需刷新的最小间隔：挡住悬停抖动与菜单反复开合
     private static let titleRefreshThrottle: TimeInterval = 0.5
 
@@ -89,6 +92,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         guard !isClosed else { return }
         isClosed = true
         reconnectWork?.cancel()
+        geometryRecheckWork?.cancel()
         probeTimer?.invalidate()
         hiddenAutoCloseTimer?.invalidate()
         HoverMonitor.shared.unregister(id: id)
@@ -143,6 +147,11 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     var debugAutoHideActive: Bool { isAutoHidden }
     var debugPeeking: Bool { isPeeking }
     var debugBarScreenFrame: CGRect? { windowController.barScreenFrame }
+    /// 仅用于 `--smoke-mc`：捕获基准矩形与实际下发的裁剪框
+    var debugBaseRect: CGRect { baseRect }
+    var debugSourceRect: CGRect { currentSourceRect() }
+    /// 仅用于 `--smoke-mc`：立即跑一次源窗口探测（平时由卡流检测驱动）
+    func debugProbeNow() { probeSource() }
 
     func setLevelMode(_ mode: WindowLevelMode) { windowController.setLevelMode(mode) }
 
@@ -282,7 +291,15 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     // MARK: - 捕获
 
     private func currentSourceRect() -> CGRect {
-        Geo.sourceRect(zoom: state.zoom, anchor: state.anchor, full: baseRect)
+        // 整窗 + 未放大时不下发裁剪框：`.zero` 让 SCK 直接给整个窗口内容。
+        // 这样即使 baseRect 没能及时跟上窗口尺寸（例如调度中心期间采样到被总览变换的
+        // 矩形），画面也只是宽高比暂时不准，不会被裁成窗口左上角局部。
+        if case .window = state.source,
+           state.zoom <= PiPSessionState.minZoom + 0.001,
+           abs(baseRect.minX) < 0.5, abs(baseRect.minY) < 0.5 {
+            return .zero
+        }
+        return Geo.sourceRect(zoom: state.zoom, anchor: state.anchor, full: baseRect)
     }
 
     private func makeConfiguration(fps: Int? = nil) -> SCStreamConfiguration {
@@ -347,17 +364,63 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     }
 
     /// 整窗 PiP 时，窗口尺寸变化要同步基准矩形与宽高比。
+    ///
+    /// 只采纳「可信」的尺寸：调度中心 / Exposé 期间 `SCWindow.frame` 报的是被总览变换过的
+    /// 矩形（且 `isOnScreen` 仍为 true），照抄会把裁剪框改小，退出总览后画面就永久停在
+    /// 源窗口左上角局部。判定见 `Geo.trustedSourceSize`。
     private func syncBaseRectIfNeeded(with window: SCWindow) {
         guard case .window = state.source else { return }
-        let size = window.frame.size
-        guard size.width > 1, size.height > 1 else { return }
         let isFullWindow = abs(baseRect.minX) < 0.5 && abs(baseRect.minY) < 0.5
         guard isFullWindow else { return }   // 窗口内的区域捕获不跟随窗口尺寸变化
+        guard let size = trustedSize(of: window) else { return }
         guard abs(baseRect.width - size.width) > 1 || abs(baseRect.height - size.height) > 1 else { return }
         baseRect = CGRect(origin: .zero, size: size)
-        sourcePixelSize = ShareableContentStore.shared.pixelSize(of: window)
+        let scale = ShareableContentStore.shared.backingScale(of: window)
+        sourcePixelSize = CGSize(width: size.width * scale, height: size.height * scale)
         windowController.setAspect(size)
         state.anchor = Geo.clampAnchor(state.anchor, zoom: state.zoom)
+    }
+
+    /// 取当前可信的源窗口尺寸；判定为总览变换时返回 nil（保持原有几何）。
+    private func trustedSize(of window: SCWindow) -> CGSize? {
+        let size = Geo.trustedSourceSize(
+            sampled: window.frame.size,
+            current: baseRect,
+            axSize: SourceWindowActivator.currentSize(of: window.windowID)
+        )
+        if size == nil {
+            Log.debug("""
+                跳过几何同步：窗口尺寸 \(Int(window.frame.width))×\(Int(window.frame.height)) \
+                像是调度中心的总览变换
+                """)
+        }
+        return size
+    }
+
+    /// 恢复后的一次性几何校正。
+    ///
+    /// 退出调度中心有 ~300ms 的动画中间态（实测会报出 1510×768 这类尺寸），
+    /// 恢复瞬间的采样未必可信；延时超过 `ShareableContentStore` 的 1 秒 TTL 再确认一次，
+    /// 顺带把历史遗留的错误几何自动纠正回来。
+    private func scheduleGeometryRecheck() {
+        guard case let .window(windowID, _, _, _) = state.source else { return }
+        geometryRecheckWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isClosed else { return }
+            ShareableContentStore.shared.window(id: windowID) { [weak self] window in
+                guard let self, !self.isClosed, let window else { return }
+                let before = self.baseRect
+                self.syncBaseRectIfNeeded(with: window)
+                guard self.baseRect != before else { return }
+                Log.debug("""
+                    几何延时校正：\(Int(before.width))×\(Int(before.height)) → \
+                    \(Int(self.baseRect.width))×\(Int(self.baseRect.height))
+                    """)
+                self.retune()
+            }
+        }
+        geometryRecheckWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.geometryRecheckDelay, execute: work)
     }
 
     // MARK: - CaptureEngineDelegate
@@ -428,6 +491,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                     self.engine.retarget(CaptureEngine.filter(for: window))
                     self.engine.restart()
                     self.update(runtimeState: .streaming)
+                    // 恢复瞬间可能落在退出总览的动画中间态，稍后再确认一次几何
+                    self.scheduleGeometryRecheck()
                 } else if window == nil {
                     self.attemptRematch()
                 }
@@ -471,10 +536,13 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             }
             Log.info("已重新匹配到源窗口：\(ShareableContentStore.shared.displayTitle(for: window))")
             self.state.source = ShareableContentStore.shared.captureSource(for: window)
-            self.baseRect = CGRect(origin: .zero, size: window.frame.size)
-            self.sourcePixelSize = ShareableContentStore.shared.pixelSize(of: window)
+            // 重新匹配同样不能照抄可能被总览变换过的尺寸
+            let size = self.trustedSize(of: window) ?? self.baseRect.size
+            self.baseRect = CGRect(origin: .zero, size: size)
+            let scale = ShareableContentStore.shared.backingScale(of: window)
+            self.sourcePixelSize = CGSize(width: size.width * scale, height: size.height * scale)
             self.windowController.setTitle(self.state.source.displayTitle)
-            self.windowController.setAspect(window.frame.size)
+            self.windowController.setAspect(size)
             self.probeTimer?.invalidate()
             self.probeTimer = nil
             self.reconnectAttempt = 0
@@ -603,6 +671,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             let visible = self.windowController.window.occlusionState.contains(.visible)
             if visible {
                 self.engine.resume()
+                // 遮挡期间（例如调度中心盖住浮窗）源窗口可能改过尺寸，恢复后确认一次
+                self.scheduleGeometryRecheck()
             } else {
                 // 浮窗被完全遮挡或所在 Space 不可见时没必要继续拉流
                 self.engine.pause()
