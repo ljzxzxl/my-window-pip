@@ -958,6 +958,8 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === contextMenu else { return }
+        // 菜单第一项显示源窗口标题，先让会话按需刷新一次再渲染
+        delegate?.pipMenuWillOpen()
         refreshMenu()
     }
 

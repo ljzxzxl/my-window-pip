@@ -21,18 +21,38 @@ enum SourceWindowActivator {
 
     private static let getWindowID: GetWindowID? = {
         guard let handle = dlopen(nil, RTLD_LAZY),
-              let symbol = dlsym(handle, "_AXUIElementGetWindow") else { return nil }
+              let symbol = dlsym(handle, "_AXUIElementGetWindow") else {
+            Log.warn("AX 窗口 ID 符号不可用，精确回源降级为「标题唯一匹配」")
+            return nil
+        }
         return unsafeBitCast(symbol, to: GetWindowID.self)
     }()
 
+    /// 精确匹配是否可用（私有符号是否解析成功），供 `--smoke-activate` 断言。
+    static var isExactMatchAvailable: Bool { getWindowID != nil }
+
+    /// AX 是同步 IPC，会打到目标进程的主线程；源 App 卡死时不能让它拖住我们的主线程。
+    private static let messagingTimeout: Float = 0.5
+
+    private static func appElement(_ pid: pid_t) -> AXUIElement {
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, messagingTimeout)
+        return element
+    }
+
+    /// 单窗口查询：只问这一个 windowID，不拉全量窗口列表。
+    static func windowInfo(of windowID: CGWindowID) -> [String: Any]? {
+        guard let list = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID)
+                as? [[String: Any]] else { return nil }
+        return list.first {
+            ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID
+        }
+    }
+
     /// 源窗口位于其它 Space、已不在 ScreenCaptureKit 缓存时，用 CGWindowList 补取 PID。
     static func ownerPID(of windowID: CGWindowID) -> pid_t? {
-        guard let list = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID)
-                as? [[String: Any]],
-              let info = list.first(where: {
-                  ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID
-              }),
-              let number = info[kCGWindowOwnerPID as String] as? NSNumber else { return nil }
+        guard let number = windowInfo(of: windowID)?[kCGWindowOwnerPID as String] as? NSNumber
+        else { return nil }
         return pid_t(number.int32Value)
     }
 
@@ -46,7 +66,7 @@ enum SourceWindowActivator {
             return runningApp.activate() ? .applicationOnly : .activationFailed
         }
 
-        let app = AXUIElementCreateApplication(pid)
+        let app = appElement(pid)
         guard let windows = windows(of: app),
               let target = exactWindow(id: windowID, in: windows)
                 ?? uniqueWindow(titled: fallbackTitle, in: windows) else {
@@ -72,10 +92,29 @@ enum SourceWindowActivator {
         return .activationFailed
     }
 
+    /// 按需取指定窗口的当前标题：AX 优先，`CGWindowName` 兜底（只做一次单窗口查询）。
+    ///
+    /// 标题只在悬停顶栏与菜单里可见，所以由这些时机按需调用，不做常驻轮询。
+    static func currentTitle(of windowID: CGWindowID) -> String? {
+        guard let info = windowInfo(of: windowID) else { return nil }
+        if let number = info[kCGWindowOwnerPID as String] as? NSNumber,
+           let axTitle = currentTitle(of: windowID, pid: pid_t(number.int32Value)) {
+            return axTitle
+        }
+        return info[kCGWindowName as String] as? String
+    }
+
+    /// 仅供 `--smoke-activate` 使用：确认捕获中的 windowID 能反查到 AX 窗口。
+    static func canResolveExactWindow(id windowID: CGWindowID, pid: pid_t) -> Bool {
+        guard Permissions.hasAccessibility,
+              let windows = windows(of: appElement(pid)) else { return false }
+        return exactWindow(id: windowID, in: windows) != nil
+    }
+
     /// 读取指定窗口的实时 AX 标题。Electron 等应用的 CGWindowName 可能不会随文档切换及时更新。
     static func currentTitle(of windowID: CGWindowID, pid: pid_t) -> String? {
         guard Permissions.hasAccessibility else { return nil }
-        let app = AXUIElementCreateApplication(pid)
+        let app = appElement(pid)
         guard let windows = windows(of: app),
               let target = exactWindow(id: windowID, in: windows) else { return nil }
 

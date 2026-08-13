@@ -76,6 +76,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         if menu === self.menu {
+            // 每会话子菜单会显示源窗口标题，趁菜单打开按需刷新一次（不做常驻轮询）
+            SessionStore.shared.refreshSourceTitles()
             rebuildMenu()
             refreshWindowList()
         } else if menu === windowsMenu {

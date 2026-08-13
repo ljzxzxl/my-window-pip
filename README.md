@@ -57,7 +57,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 
 **Interaction**
 - A dimmed overlay with an arrow points at the menu bar icon on first launch, so it is obvious the app is running in the background; replay it any time from *Show Getting Started*.
-- Click a PiP window to switch straight to its source app (optional); with Accessibility granted it identifies the source by window ID and raises that exact window. PiP titles follow source title changes automatically.
+- Click a PiP window to switch straight to its source app (optional); with Accessibility granted it identifies the source by window ID and raises that exact window, restoring it if it was minimized. Titles refresh on demand when the top bar or a menu appears — no background polling.
 - Auto-hide with click-through: the window fades out and pauses when the pointer moves over it — but the **top bar stays usable**: rest the pointer on the bar and the window returns to full opacity so you can click buttons, drag it by the bar, or open the right-click menu, while the video area stays click-through.
 - While faded you can also hold `⌥` to peek at the whole window, or turn auto-hide off from the window's menu bar submenu. The faded opacity is configurable in 5% steps (default 35%).
 - Hover overlay controls: pause, frame rate, reset zoom, auto-hide, idle detection, close. Icons highlight on hover and the description appears instantly above the icon.
@@ -149,6 +149,7 @@ Built-in self-tests (no UI, useful after any change):
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-autohide   # auto-hide fade / restore
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-bar        # top-bar hot zone
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding # first-launch overlay
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # exact source window + on-demand title
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # real download + SHA256 check
 ```
 
@@ -170,7 +171,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 
 - Requires macOS 14+ so that `SCStream.updateConfiguration` can retune frame rate, resolution and crop smoothly; there is no 12.3–13 compatibility path.
 - `fn` combinations and hover keys need an event tap, so they live in the optional Accessibility-gated enhanced mode. Everything else works with Screen Recording alone.
-- While a source window is minimized the system produces no frames, so a placeholder is shown until it comes back — a macOS limitation, not a bug.
+- While a source window is minimized the system produces no frames, so a placeholder is shown until it comes back — a macOS limitation, not a bug. Clicking the PiP un-minimizes the source window when Accessibility is granted.
 - "Reset zoom" in the top bar refers to the **content zoom factor**, not the window size; it stays disabled until you zoom in with `Cmd`-drag or `Cmd`-scroll.
 - Launch at login uses `SMAppService`, which can fail for ad-hoc signed apps; the app then points you to System Settings.
 - Not implemented yet: audio follow, image filters such as contrast enhancement, and command-line control of a running instance. Hooks for all three are already in place.
@@ -202,7 +203,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 
 **交互**
 - 首次启动有一层遮罩 + 箭头引导指向菜单栏图标，明确告知「应用已在后台运行、入口在这里」；之后可从菜单栏「显示上手引导」重看。
-- 单击浮窗直接切回源应用窗口（可关闭）；已授予辅助功能权限时会按窗口 ID 精确抬起对应窗口。浮窗标题会自动跟随源窗口标题变化。
+- 单击浮窗直接切回源应用窗口（可关闭）；已授予辅助功能权限时会按窗口 ID 精确抬起对应窗口，源窗口已最小化也会一并恢复。浮窗标题在顶栏浮出、菜单打开时按需刷新，不做后台轮询。
 - 自动隐藏 + 点击穿透：鼠标移上去浮窗淡出并暂停，可直接操作背后的内容；此时**顶栏仍然可用**——鼠标停在顶栏范围内浮窗就会恢复不透明，可以点按钮、按住顶栏拖动窗口、调出右键菜单，画面区域依旧穿透。
 - 淡出后也可以按住 `⌥` 临时唤回整窗，或在菜单栏的浮窗子菜单里关掉自动隐藏。淡出透明度可调，5% 一档（默认 35%）。
 - 悬停浮出控制条：暂停、帧率、复位缩放、自动隐藏、静止检测、关闭；图标有悬停高亮，说明文字立刻显示在图标上方。
@@ -294,6 +295,7 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-autohide   # 自动隐藏淡出/恢复
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-bar        # 顶栏热区
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding # 首启引导浮层
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # 精确回源窗口 + 标题按需刷新
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # 真实下载 + SHA256 校验
 ```
 
@@ -315,7 +317,7 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 
 - 需要 macOS 14+：为了用 `SCStream.updateConfiguration` 平滑改帧率/分辨率/裁剪，不做 12.3–13 的兼容分支。
 - `fn` 组合键、「悬停按键」与精确切换到具体源窗口需要辅助功能权限；未授权时，单击浮窗仍会激活源应用，但由应用决定显示哪个窗口。
-- 源窗口最小化时系统不再产出画面，只能显示占位并等待恢复（这是 macOS 的限制，不是 bug）。
+- 源窗口最小化时系统不再产出画面，只能显示占位并等待恢复（这是 macOS 的限制，不是 bug）；已授予辅助功能权限时，单击浮窗会把最小化的源窗口恢复出来。
 - 顶栏的「复位缩放」指的是**画面放大倍率**，与浮窗窗口大小无关；没有用 `Cmd` 拖拽或 `Cmd` 滚轮放大过画面时它是灰色不可用的。
 - 登录自启动依赖 `SMAppService`，ad-hoc 签名下可能失败，失败时会提示改用系统设置手动添加。
 - 暂未实现：音频跟随、增强对比度等画面滤镜、命令行控制已运行实例。三者的架构挂点都已预留。

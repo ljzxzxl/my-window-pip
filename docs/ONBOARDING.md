@@ -36,6 +36,9 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **拖动是手动实现的**：`isMovableByWindowBackground = false`，由 `PiPContentView` 在 `mouseDragged` 里按位移 `setFrameOrigin`。原因是系统背景拖动会吞掉 `mouseUp`，拿不到干净的单击，而单击要用来「切回源应用」。改动手势时注意保持「拖动后触发 `pipDidMove` 持久化」与「跨屏 scale 变化后 retune」两条链路。
 - **自动隐藏必须留逃生通道**：淡出后浮窗 `ignoresMouseEvents = true`，收不到任何鼠标事件。通道有四条：鼠标停在顶栏热区（`HoverMonitor` 的 `hotZoneProvider` + `PiPWindowController.barScreenFrame`）、按住 ⌥ 临时唤回、菜单栏每会话子菜单、开启时的 3 秒提示。改动自动隐藏逻辑时这几条不能破。
 - **双语**：用户可见字符串一律 `L.t("中文", "English")`，不引入 `.lproj`。
+- **AX 调用一律带超时**：`AXUIElementCopyAttributeValue` 等是同步 IPC，会打到目标进程主线程，源 App 卡死时会连带冻住我们的主线程。AX 访问集中在 `SourceWindowActivator`，元素统一由内部的 `appElement(_:)` 创建（已 `AXUIElementSetMessagingTimeout(0.5)`）；不要在别处直接 `AXUIElementCreateApplication`。
+- **窗口元数据只按需取，不做常驻轮询**：SCK 帧只有像素、不带标题。源窗口标题只在悬停浮出的顶栏与菜单里可见，所以刷新时机固定为三处——`handleHover` 的悬停上升沿、`PiPWindowController.menuNeedsUpdate`（经 `pipMenuWillOpen`）、`StatusBarController.menuWillOpen`（经 `SessionStore.refreshSourceTitles()`），每会话 0.5 秒节流。实测全量 `CGWindowListCopyWindowInfo(.optionAll)` 单次 2.0ms、单会话 AX 标题往返 1.6ms，2 秒轮询 3 路会话≈0.35% CPU 常驻，和 1fps 捕获同量级，不值得。
+- **精确回源靠私有符号**：AX 没有公开的 `CGWindowID` 属性，`SourceWindowActivator` 用 `dlsym` 动态解析 `_AXUIElementGetWindow`。解析失败会打一条 `Log.warn` 并退到「标题唯一匹配」——同名窗口不唯一时绝不猜（历史 bug 就是回退到 `windows[0]` 抬错窗口）。`--smoke-activate` 会断言符号可用且能反查到捕获中的窗口。
 
 ## 常用命令
 
@@ -47,6 +50,7 @@ bash scripts/build-app.sh --fast --debug     # 开发期快速构建（单架构
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-autohide        # 自动隐藏淡出/恢复回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-bar             # 顶栏热区回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding      # 首启引导浮层回归
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate        # 精确回源窗口 + 标题按需刷新回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update          # 更新链路回归（真实下载 + SHA256 校验）
 bash scripts/reset-permission.sh             # 重建后重置 TCC 记录
 ```

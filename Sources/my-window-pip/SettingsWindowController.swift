@@ -13,6 +13,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var hotkeyStatusLabel: NSTextField?
     private var accessibilityStatusLabel: NSTextField?
+    private var clickToActivateHint: NSTextField?
     private var enhancedCheckbox: NSButton?
     private var launchAtLoginCheckbox: NSButton?
 
@@ -111,6 +112,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             L.t("单击浮窗切换到源应用窗口", "Click a PiP window to switch to its source app"),
             on: prefs.clickToActivateSource, action: #selector(clickToActivateChanged(_:))
         ))
+
+        // 未授予辅助功能时只做非模态说明：不弹权限框是本项目一贯的约定
+        let clickHint = hint(L.t(
+            "未授予辅助功能权限时，单击浮窗只能激活源应用，由应用自己决定显示哪个窗口；"
+                + "要精确切到被捕获的那个窗口，请在「增强模式」标签页里开启辅助功能权限。",
+            "Without Accessibility, clicking a PiP can only activate the source app, which decides "
+                + "which window to show. Grant Accessibility in the Enhanced tab to raise the exact window."
+        ))
+        clickToActivateHint = clickHint
+        stack.addArrangedSubview(clickHint)
 
         let loginBox = checkbox(
             L.t("登录时自动启动", "Launch at login"),
@@ -261,6 +272,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             ? L.t("辅助功能权限：已授权", "Accessibility: granted")
             : L.t("辅助功能权限：未授权", "Accessibility: not granted")
         accessibilityStatusLabel?.textColor = granted ? .secondaryLabelColor : .systemOrange
+        clickToActivateHint?.isHidden = granted || !prefs.clickToActivateSource
         enhancedCheckbox?.state = EventTapManager.shared.isEnabled ? .on : .off
         launchAtLoginCheckbox?.state = LoginItem.isEnabled ? .on : .off
     }
@@ -302,11 +314,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     @objc private func clickToActivateChanged(_ sender: NSButton) {
-        let enabled = sender.state == .on
-        prefs.clickToActivateSource = enabled
-        if enabled, !Permissions.hasAccessibility {
-            Permissions.showAccessibilityGuide()
-        }
+        prefs.clickToActivateSource = sender.state == .on
+        refreshDynamicStates()
     }
 
     @objc private func launchAtLoginChanged(_ sender: NSButton) {

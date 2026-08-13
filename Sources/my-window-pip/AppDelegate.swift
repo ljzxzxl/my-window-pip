@@ -49,6 +49,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--smoke-bar") { runTopBarRegression() }
         if CommandLine.arguments.contains("--smoke-onboarding") { runOnboardingRegression() }
         if CommandLine.arguments.contains("--smoke-update") { runUpdateRegression() }
+        if CommandLine.arguments.contains("--smoke-activate") { runActivateRegression() }
+    }
+
+    /// `--smoke-activate`：精确回源与标题按需刷新回归自检。
+    /// 建一路 PiP → 打印私有符号 / 权限状态 → 断言捕获中的 CGWindowID 能反查到 AX 窗口
+    /// → 跑一次按需标题刷新 → 清理退出。不会真的抢焦点（不调用 activate）。
+    private func runActivateRegression() {
+        Log.info("[activate] 开始精确回源回归自检")
+        Log.info("""
+            [activate] AX 窗口 ID 符号=\(SourceWindowActivator.isExactMatchAvailable ? "可用" : "不可用") \
+            辅助功能=\(Permissions.hasAccessibility ? "已授权" : "未授权")
+            """)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            SessionStore.shared.pipFrontmostWindow()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard let session = SessionStore.shared.sessions.first,
+                  let windowID = session.sourceWindowID else {
+                Log.error("[activate] 没能建立窗口会话")
+                NSApp.terminate(nil)
+                return
+            }
+            guard let pid = SourceWindowActivator.ownerPID(of: windowID) else {
+                Log.error("[activate] 单窗口查询拿不到 PID [windowID=\(windowID)]")
+                NSApp.terminate(nil)
+                return
+            }
+            let resolved = SourceWindowActivator.canResolveExactWindow(id: windowID, pid: pid)
+            Log.info("""
+                [activate] windowID=\(windowID) pid=\(pid) \
+                AX 反查=\(resolved ? "命中" : "未命中")（期望：已授权辅助功能时命中）
+                """)
+
+            let before = session.title
+            session.refreshSourceTitleNow()
+            let cgName = SourceWindowActivator.windowInfo(of: windowID)?[
+                kCGWindowName as String
+            ] as? String
+            Log.info("""
+                [activate] 标题按需刷新：刷新前=\(before) 刷新后=\(session.title) \
+                CGWindowName=\(cgName ?? "nil")
+                """)
+
+            SessionStore.shared.closeAll()
+            Log.info("[activate] 结束，剩余会话 \(SessionStore.shared.sessions.count)")
+            NSApp.terminate(nil)
+        }
     }
 
     /// `--smoke-update`：更新链路回归自检。

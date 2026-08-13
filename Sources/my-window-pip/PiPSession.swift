@@ -34,10 +34,16 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private var hiddenAutoCloseTimer: Timer?
     private var occlusionObserver: NSObjectProtocol?
     private var didExplainApplicationOnlyActivation = false
+    /// 上次按需刷新标题的时刻，用于节流
+    private var lastTitleRefresh: Date?
+    /// 悬停上升沿判定（`HoverMonitor` 只在状态变化时回调，这里再收敛到「进入」这一个时机）
+    private var wasHovering = false
     private var isClosed = false
 
     private static let hiddenAutoCloseSeconds: TimeInterval = 60
     private static let maxReconnectAttempts = 3
+    /// 标题按需刷新的最小间隔：挡住悬停抖动与菜单反复开合
+    private static let titleRefreshThrottle: TimeInterval = 0.5
 
     // MARK: - 生命周期
 
@@ -103,8 +109,11 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func bringToFront() { windowController.bringToFront() }
     func flashHighlight() { windowController.flashHighlight() }
 
-    /// ScreenCaptureKit 帧不携带窗口元数据；由 `SessionStore` 的共享低频刷新更新可变标题，
-    /// `CGWindowID` 身份保持不变。
+    /// ScreenCaptureKit 帧不携带窗口元数据，所以可变标题得单独取。
+    ///
+    /// 标题只在悬停浮出的顶栏与菜单里可见，因此**只在这些时机按需刷新**（见
+    /// `refreshSourceTitleNow()`），不做常驻轮询：AX 是同步 IPC，常驻轮询既有稳态开销，
+    /// 也会在源 App 卡死时拖住主线程。`CGWindowID` 身份始终不变。
     func refreshSourceTitle(_ title: String) {
         guard !isClosed,
               case let .window(windowID, bundleID, appName, oldTitle) = state.source else { return }
@@ -115,6 +124,16 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         )
         windowController.setTitle(state.source.displayTitle)
         Log.debug("源窗口标题已更新：\(state.source.displayTitle)")
+    }
+
+    /// 按需刷新标题：鼠标进入浮窗、浮窗右键菜单更新、菜单栏菜单打开时各调用一次。
+    func refreshSourceTitleNow() {
+        guard !isClosed, let windowID = state.source.windowID else { return }
+        if let last = lastTitleRefresh,
+           Date().timeIntervalSince(last) < Self.titleRefreshThrottle { return }
+        lastTitleRefresh = Date()
+        guard let title = SourceWindowActivator.currentTitle(of: windowID) else { return }
+        refreshSourceTitle(title)
     }
 
     /// 仅用于 `--smoke` 集成自检的调试信息
@@ -508,6 +527,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private func handleHover(_ hover: HoverState) {
         guard !isClosed else { return }
 
+        // 顶栏一旦浮出就会显示源窗口标题，趁进入的这一刻按需刷新一次
+        if hover.isHovering, !wasHovering { refreshSourceTitleNow() }
+        wasHovering = hover.isHovering
+
         guard state.autoHide else {
             peekReason = nil
             windowController.setControlsVisible(hover.isHovering)
@@ -689,8 +712,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                     )
                 }
             case .windowNotFound:
+                // 这一步其实已经激活了源应用，只是没能定位到具体窗口，别把话说成完全失败
                 windowController.showHint(
-                    L.t("无法定位对应的源窗口", "Could not locate the matching source window"),
+                    L.t("已切换到源应用，但未能定位具体窗口",
+                        "Switched to the source app, but could not locate the exact window"),
                     near: nil, duration: 2.0
                 )
                 Log.warn("单击回源未找到 AX 窗口：\(appName) [windowID=\(windowID)]")
@@ -714,6 +739,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             )
         }
     }
+
+    func pipMenuWillOpen() { refreshSourceTitleNow() }
 
     func pipDidMove() {
         Preferences.shared.setOrigin(windowController.frameOrigin, for: state.source.preferenceKey)

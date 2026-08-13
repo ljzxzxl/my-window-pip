@@ -196,5 +196,7 @@ protocol PiPWindowDelegate: AnyObject {
     func pipRequestActivateSource()
     /// 切换「单击浮窗切换到源应用」开关
     func pipRequestToggleClickToActivate()
+    /// 右键菜单将要更新：会话可趁此按需刷新源窗口标题
+    func pipMenuWillOpen()
     func pipDidMove()
 }

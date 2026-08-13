@@ -12,11 +12,7 @@ final class SessionStore {
     /// 软上限：超过后提示一次，用户确认可继续
     static let softLimit = 6
 
-    /// SCStream 帧只有像素、不含新标题；所有会话共用一次元数据刷新。
-    private static let metadataRefreshInterval: TimeInterval = 2.0
-
     private var screenObserver: NSObjectProtocol?
-    private var metadataRefreshTimer: Timer?
 
     private init() {
         screenObserver = NotificationCenter.default.addObserver(
@@ -36,6 +32,12 @@ final class SessionStore {
 
     func session(windowID: CGWindowID) -> PiPSession? {
         sessions.first { $0.sourceWindowID == windowID }
+    }
+
+    /// 菜单栏菜单将要打开时按需刷新全部窗口会话的标题（各会话内部有 0.5 秒节流）。
+    /// 不用常驻定时器：标题只在菜单与悬停顶栏里可见，轮询等于白付稳态开销。
+    func refreshSourceTitles() {
+        sessions.forEach { $0.refreshSourceTitleNow() }
     }
 
     // MARK: - 创建入口
@@ -178,57 +180,10 @@ final class SessionStore {
         session.onClose = { [weak self] closed in
             guard let self else { return }
             self.sessions.removeAll { $0 === closed }
-            self.updateMetadataRefreshTimer()
             self.onChange?()
         }
         sessions.append(session)
-        updateMetadataRefreshTimer()
         onChange?()
-    }
-
-    private func updateMetadataRefreshTimer() {
-        let needsRefresh = sessions.contains { $0.sourceWindowID != nil }
-        guard needsRefresh else {
-            metadataRefreshTimer?.invalidate()
-            metadataRefreshTimer = nil
-            return
-        }
-        guard metadataRefreshTimer == nil else { return }
-
-        let timer = Timer(timeInterval: Self.metadataRefreshInterval, repeats: true) {
-            [weak self] _ in self?.refreshSourceTitles()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        metadataRefreshTimer = timer
-    }
-
-    private func refreshSourceTitles() {
-        let windowIDs = Set(sessions.compactMap(\.sourceWindowID))
-        guard !windowIDs.isEmpty,
-              let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)
-                as? [[String: Any]] else { return }
-
-        var pids: [CGWindowID: pid_t] = [:]
-        var fallbackTitles: [CGWindowID: String] = [:]
-        for info in windows {
-            guard let number = info[kCGWindowNumber as String] as? NSNumber else { continue }
-            let windowID = CGWindowID(number.uint32Value)
-            guard windowIDs.contains(windowID) else { continue }
-            if let owner = info[kCGWindowOwnerPID as String] as? NSNumber {
-                pids[windowID] = pid_t(owner.int32Value)
-            }
-            if let title = info[kCGWindowName as String] as? String {
-                fallbackTitles[windowID] = title
-            }
-        }
-        for session in sessions {
-            guard let windowID = session.sourceWindowID else { continue }
-            let title = pids[windowID].flatMap {
-                SourceWindowActivator.currentTitle(of: windowID, pid: $0)
-            } ?? fallbackTitles[windowID]
-            guard let title else { continue }
-            session.refreshSourceTitle(title)
-        }
     }
 
     private func confirmIfOverLimit() -> Bool {
