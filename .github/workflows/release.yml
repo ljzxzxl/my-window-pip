@@ -23,8 +23,42 @@ jobs:
             exit 1
           fi
 
+      # 发布包必须用固定身份签名：TCC 记的是 designated requirement，
+      # ad-hoc 签名会退化成钉死 cdhash，用户每次升级都要重新授权录屏。
+      - name: 导入签名证书
+        env:
+          CERT_P12_BASE64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12_BASE64" ]; then
+            echo "::error::缺少 Secret SIGNING_CERT_P12_BASE64，发布包必须用固定身份签名"
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # 允许 codesign 免交互使用私钥
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
       - name: 构建 App（通用二进制）
         run: bash scripts/build-app.sh
+
+      - name: 校验发布包签名
+        run: |
+          APP="build/MyWindowPip.app"
+          codesign --verify --strict "$APP"
+          if codesign -d -r- "$APP" 2>&1 | grep -q 'designated => cdhash'; then
+            echo "::error::designated requirement 是 cdhash（ad-hoc 签名），用户升级后会被要求重新授权录屏"
+            exit 1
+          fi
+          codesign -d -r- "$APP" 2>&1 | grep 'designated =>'
 
       - name: 打包 DMG
         run: bash packaging/make-dmg.sh
@@ -36,3 +70,10 @@ jobs:
             dist/*.dmg
             dist/*.dmg.sha256
           generate_release_notes: true
+
+      - name: 清理签名 keychain
+        if: always()
+        run: |
+          if [ -n "${SIGN_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGN_KEYCHAIN" || true
+          fi

@@ -53,6 +53,8 @@ enum Permissions {
             2. 在列表中找到 MyWindowPip，打开右侧开关
             3. 重新启动 MyWindowPip（macOS 要求重启应用后权限才生效）
 
+            如果列表里已经有 MyWindowPip、开关也是开的，说明是旧版本留下的失效记录：点「重置授权记录」再重启，即可重新授权，不必手动减号删除。
+
             画面只在本机内存中流转，不会被保存或上传。
             """,
             """
@@ -63,17 +65,89 @@ enum Permissions {
             2. Find MyWindowPip in the list and turn the switch on
             3. Relaunch MyWindowPip (macOS only applies the grant after a restart)
 
+            If MyWindowPip is already listed and switched on, the entry is a stale record left by an \
+            older build: click "Reset permission record", then relaunch — no need to remove it manually.
+
             Frames stay in local memory and are never saved or uploaded.
             """
         )
         alert.addButton(withTitle: L.t("打开系统设置", "Open System Settings"))
+        alert.addButton(withTitle: L.t("重置授权记录", "Reset permission record"))
         alert.addButton(withTitle: L.t("重新启动应用", "Relaunch app"))
         alert.addButton(withTitle: L.t("稍后", "Later"))
         activateForDialog()
         switch alert.runModal() {
         case .alertFirstButtonReturn: openScreenRecordingSettings()
-        case .alertSecondButtonReturn: relaunch()
+        case .alertSecondButtonReturn: resetScreenRecordingRecordWithGuide()
+        case .alertThirdButtonReturn: relaunch()
         default: break
+        }
+    }
+
+    /// 清除本应用的录屏授权记录，并根据结果引导下一步。
+    static func resetScreenRecordingRecordWithGuide() {
+        let succeeded = resetScreenRecordingRecord()
+        let alert = NSAlert()
+        alert.alertStyle = succeeded ? .informational : .warning
+        if succeeded {
+            alert.messageText = L.t("已清除授权记录", "Permission record cleared")
+            alert.informativeText = L.t(
+                """
+                重新启动 MyWindowPip 后，系统会再次询问屏幕录制权限，点「允许」即可。
+
+                这次授权之后的版本更新都不会再要求重新授权。
+                """,
+                """
+                After relaunching MyWindowPip, macOS will ask for Screen Recording again — click Allow.
+
+                Once granted, future updates will keep the permission.
+                """
+            )
+            alert.addButton(withTitle: L.t("重新启动应用", "Relaunch app"))
+            alert.addButton(withTitle: L.t("稍后", "Later"))
+            activateForDialog()
+            if alert.runModal() == .alertFirstButtonReturn { relaunch() }
+        } else {
+            alert.messageText = L.t("未能清除授权记录", "Could not clear the permission record")
+            alert.informativeText = L.t(
+                """
+                请手动处理：打开「系统设置 → 隐私与安全性 → 屏幕录制与系统录音」，
+                选中 MyWindowPip 后点减号删除，再点加号重新添加，然后重启应用。
+                """,
+                """
+                Please do it manually: open System Settings → Privacy & Security → \
+                Screen & System Audio Recording, select MyWindowPip and remove it with −, \
+                add it again with +, then relaunch the app.
+                """
+            )
+            alert.addButton(withTitle: L.t("打开系统设置", "Open System Settings"))
+            alert.addButton(withTitle: L.t("好", "OK"))
+            activateForDialog()
+            if alert.runModal() == .alertFirstButtonReturn { openScreenRecordingSettings() }
+        }
+    }
+
+    /// 重置本应用的录屏授权记录。
+    ///
+    /// ad-hoc 签名的旧版本在 TCC 里留下的是按 cdhash 钉死的记录：升级到固定身份签名的新版本后，
+    /// 那条记录既匹配不上、又占着列表位置，用户只能手动减号删除再加号添加。
+    /// `tccutil reset` 操作的是当前用户的隐私数据库，不需要管理员权限；
+    /// 只重置 ScreenCapture，避免顺手清掉用户的辅助功能等其它授权。
+    @discardableResult
+    static func resetScreenRecordingRecord() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "ScreenCapture", bundleID]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let ok = process.terminationStatus == 0
+            if !ok { Log.error("tccutil 退出码 \(process.terminationStatus)") }
+            return ok
+        } catch {
+            Log.error("重置录屏授权记录失败：\(error.localizedDescription)")
+            return false
         }
     }
 

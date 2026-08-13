@@ -41,6 +41,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **总览期间的窗口 frame 不可信**：调度中心 / Exposé 打开时 WindowServer 会把窗口等比缩小并内移，`SCWindow.frame` 与 `CGWindowListCopyWindowInfo` 的 bounds 报的都是**变换后**的矩形，而 `isOnScreen` 仍是 true（实测 1600×813 → 1092×555@(102,102)），AX 的 `kAXSize` 则不受影响。任何「按窗口尺寸更新几何」的代码都必须走 `Geo.trustedSourceSize(sampled:current:axSize:)`：有辅助功能权限时以 AX 为权威，没有权限时靠「两轴等比缩小」签名拒绝脏值。历史 bug 就是探测器在总览期间把裁剪框改小，退出后画面永久停在源窗口左上角局部放大。
 - **zoom = 1 时不下发 `sourceRect`**：整窗且未放大时把 `sourceRect` 留成 `.zero`（SCK 语义 = 整个 filter 内容），既让画面天然跟随源窗口尺寸变化，也让几何采样出错时最坏只影响宽高比，不会裁歪画面。窗口内区域捕获与显示器区域捕获仍走显式裁剪。恢复流之后还有一次 1.2 秒的延时几何校正（要大于 `ShareableContentStore` 的 1 秒 TTL 才能拿到新采样）。
 - **精确回源靠私有符号**：AX 没有公开的 `CGWindowID` 属性，`SourceWindowActivator` 用 `dlsym` 动态解析 `_AXUIElementGetWindow`。解析失败会打一条 `Log.warn` 并退到「标题唯一匹配」——同名窗口不唯一时绝不猜（历史 bug 就是回退到 `windows[0]` 抬错窗口）。`--smoke-activate` 会断言符号可用且能反查到捕获中的窗口。
+- **发布包必须用固定身份签名**：TCC 保存的是 App 的 designated requirement。ad-hoc 签名没有证书可锚定，requirement 退化成钉死 cdhash（`designated => cdhash H"…"`），改一个字符重编就算「另一个 App」，用户升级后必须重新授权、还得手动删掉系统设置里那条失效记录。固定身份的 requirement 是 `identifier "com.ljzxzxl.mywindowpip" and certificate root = H"c9d5f608…"`，与二进制内容无关，因此同一张证书签出的所有版本共用一条授权记录。详见下面「发布签名」。
 
 ## 常用命令
 
@@ -71,6 +72,35 @@ swiftc -typecheck -target x86_64-apple-macos14.0 \
   Sources/my-window-pip/<你的文件>.swift
 ```
 
+## 发布签名
+
+`scripts/build-app.sh` 默认用自签证书「MyWindowPip Signing」签名，两个环境变量可覆盖：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `SIGN_IDENTITY` | `MyWindowPip Signing` | 签名身份名称 |
+| `SIGN_KEYCHAIN` | `~/Library/Keychains/mywindowpip-signing.keychain-db` | 证书所在 keychain；文件存在时才追加 `--keychain` |
+
+证书不在默认搜索列表里，所以 `security find-identity -v -p codesigning` 报 0 个身份是正常的，签名时必须显式指定 keychain。签名失败会自动回落 ad-hoc 并打印警告，构建末尾还会断言 requirement 里不含 `cdhash`。**回落后的包不要发布**。
+
+CI（`.github/workflows/release.yml`）从 Secrets 导入证书到临时 keychain 后再构建，缺 `SIGNING_CERT_P12_BASE64` 直接失败，构建后再校验一次签名，最后 `if: always()` 删掉 keychain。一次性导出 `.p12` 的命令：
+
+```bash
+security export -k ~/Library/Keychains/mywindowpip-signing.keychain-db \
+  -t identities -f pkcs12 -o mywindowpip-signing.p12
+base64 -i mywindowpip-signing.p12 | pbcopy   # 粘到 Secret: SIGNING_CERT_P12_BASE64
+                                             # 导出时设的密码存 Secret: SIGNING_CERT_PASSWORD
+```
+
+风险提示：**`.p12` 与密码必须离线备份**。证书丢失或更换意味着 requirement 变化，所有用户都要重新授权一次（届时让他们点权限引导框里的「重置授权记录」）。自签证书不解决 Gatekeeper 首次拦截，那需要 Developer ID + 公证。
+
+验证签名是否达标：
+
+```bash
+codesign --verify --strict build/MyWindowPip.app
+codesign -d -r- build/MyWindowPip.app 2>&1 | grep 'designated =>'   # 不应出现 cdhash
+```
+
 ## 加新功能时的落点
 
 | 想做的事 | 该改哪里 |
@@ -88,5 +118,6 @@ swiftc -typecheck -target x86_64-apple-macos14.0 \
 - 热键没反应：`HotkeyManager.failedActions` 非空说明被别的应用占用，设置页会提示；`fn` 组合键必须开增强模式。
 - 增强模式突然失灵：系统会在负载高时禁用事件监听，`EventTapManager` 已监听 `tapDisabledByTimeout` 自动恢复，日志里能看到告警。
 - 系统设置的「屏幕录制」列表里没有本应用：说明启动路径没走 `Permissions.ensureScreenRecording()`（它内部会先 `CGRequestScreenCaptureAccess()` 再补一次 `SCShareableContent` 探测，TCC 只有被真正请求过才会建条目）。
+- 升级后又被要求授权录屏：先 `codesign -d -r- <app> | grep designated`，出现 `cdhash` 就是签名回落成 ad-hoc 了（证书缺失或 keychain 锁着）。requirement 正常仍要求授权，说明本机残留旧版本的失效记录，点引导框里的「重置授权记录」或跑 `scripts/reset-permission.sh` 清一次。
 - 浮窗淡出后点不到任何东西：这是点击穿透的预期行为，按住 ⌥ 临时唤回、或把鼠标停在顶栏热区，也可从菜单栏该浮窗的子菜单关掉自动隐藏。
 - 更新下载失败：先跑 `--smoke-update` 看是网络还是逻辑问题。**踩过的坑**：`URLSession.shared` 默认空闲超时只有 60 秒，而本机拉 GitHub 的 1.9 MB DMG 实测要 80 秒以上，于是必定超时。现在 `Updater` 用专用会话（空闲 120s / 整体 1800s / `waitsForConnectivity`），下载走 `URLSessionDownloadDelegate` 以便上报进度；临时文件必须在 `didFinishDownloadingTo` 里**同步**搬走，否则回调返回后就被系统删了。

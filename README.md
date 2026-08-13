@@ -90,6 +90,8 @@ Enhanced mode (optional, requires Accessibility) adds `fn`+`P` / `fn`+`⇧`+`P` 
 
 The system prompt appears on first launch and the app registers itself under *System Settings → Privacy & Security → Screen & System Audio Recording*, so you just flip the switch — no need to add it manually with the "+" button. macOS only applies the grant after a restart; the guide dialog has a "Relaunch app" button for that.
 
+Release builds from v0.1.4 on are signed with a stable identity, so the grant **survives app updates**. If you are upgrading from v0.1.3 or earlier, macOS may ask once more because the old build left a stale record: click **Reset permission record** in the guide dialog, relaunch, and allow — later updates will keep it. Also drag the app into `/Applications` before running it; launching from the DMG or Downloads folder makes macOS randomise the path, which confuses the grant.
+
 Frames stay in local memory and VRAM: nothing is written to disk, uploaded, or reported. The app makes no network requests other than update checks.
 
 ### Download
@@ -98,7 +100,7 @@ Grab the DMG from the [Releases page](https://github.com/ljzxzxl/my-window-pip/r
 
 ### Installing / first launch
 
-Release builds are **ad-hoc signed** (not notarized), so Gatekeeper blocks the first launch. Either:
+Release builds are **signed with a self-signed certificate** (not notarized), so Gatekeeper blocks the first launch. Either:
 
 ```bash
 xattr -cr /Applications/MyWindowPip.app
@@ -106,7 +108,7 @@ xattr -cr /Applications/MyWindowPip.app
 
 or right-click the app in Finder, choose "Open", then confirm.
 
-Because ad-hoc signed binaries get a new code hash on every build, macOS may ask for Screen Recording again after an update. `bash scripts/reset-permission.sh` clears the stale TCC records.
+Install it into `/Applications` and launch from there. A stable identity plus a stable path is what keeps the Screen Recording grant alive across updates; if the grant is nevertheless requested again, `bash scripts/reset-permission.sh` (or the in-app **Reset permission record** button) clears the stale TCC records.
 
 ### Frame rate guide
 
@@ -238,6 +240,8 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 
 首次启动会弹出系统的屏幕录制授权框，本应用会自动出现在「系统设置 → 隐私与安全性 → 屏幕录制与系统录音」列表里，**直接打开开关即可，不需要手动点加号添加**。macOS 要求授权后重启应用才生效，引导框里有「重新启动应用」按钮。
 
+v0.1.4 起发布包使用固定签名身份，**授权可以跨版本存活**，更新后不再重新索要。从 v0.1.3 及更早版本升级上来时，因为旧包留下的是失效记录，还会被要求授权一次：在引导框里点**「重置授权记录」**→ 重启 → 允许，之后所有更新都会保留。另外请把 App 拖进 `/Applications` 再运行——直接从 DMG 或下载目录启动会被 macOS 随机化路径，同样会干扰授权。
+
 画面只在本机内存与显存中流转：不写磁盘、不上传、不做任何遥测；除主动检查更新外不发起任何网络请求。
 
 ### 下载
@@ -246,7 +250,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 
 ### 安装与首次启动
 
-发布版本为 **ad-hoc 签名**（未经过 Apple 公证），首次启动会被 Gatekeeper 拦截。两种方式任选其一：
+发布版本使用**自签证书签名**（未经过 Apple 公证），首次启动会被 Gatekeeper 拦截。两种方式任选其一：
 
 ```bash
 xattr -cr /Applications/MyWindowPip.app
@@ -254,7 +258,7 @@ xattr -cr /Applications/MyWindowPip.app
 
 或者在 Finder 里右键点击 App 选择「打开」并确认。
 
-由于 ad-hoc 签名的二进制每次构建指纹都会变，更新后 macOS 可能重新索要屏幕录制权限，跑一次 `bash scripts/reset-permission.sh` 清掉旧记录即可。
+请安装到 `/Applications` 并从那里启动：固定的签名身份 + 固定的路径，才能让屏幕录制授权跨版本存活。万一仍被要求重新授权，跑一次 `bash scripts/reset-permission.sh`（或用引导框里的**「重置授权记录」**按钮）清掉旧记录即可。
 
 ### 帧率建议
 

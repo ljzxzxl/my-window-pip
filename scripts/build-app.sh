@@ -7,6 +7,10 @@
 #   bash scripts/build-app.sh --debug      # 带 DEBUG 日志的构建
 #   bash scripts/build-app.sh --install    # 构建后安装到 /Applications（路径稳定，减少反复授权）
 #   bash scripts/build-app.sh --fast       # 只编当前架构，开发期加速
+#
+# 环境变量:
+#   SIGN_IDENTITY  签名身份，默认 "MyWindowPip Signing"（自签证书，保证录屏授权跨版本存活）
+#   SIGN_KEYCHAIN  证书所在 keychain，默认 ~/Library/Keychains/mywindowpip-signing.keychain-db
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -83,14 +87,35 @@ if [ -f Resources/AppIcon.png ]; then
     iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-/usr/bin/codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || \
-    echo "[build-app] 警告：ad-hoc 签名失败，App 仍可运行"
+# 签名。必须用固定身份：TCC（录屏授权）记的是 designated requirement，
+# ad-hoc 签名的 requirement 会退化成钉死 cdhash，每次重新编译都算「另一个 App」，
+# 用户升级后就得重新授权、还要手动删掉系统设置里那条同名旧记录。
+SIGN_IDENTITY="${SIGN_IDENTITY:-MyWindowPip Signing}"
+SIGN_KEYCHAIN="${SIGN_KEYCHAIN:-$HOME/Library/Keychains/mywindowpip-signing.keychain-db}"
+
+SIGN_ARGS=(--force --sign "$SIGN_IDENTITY")
+# 证书在独立 keychain 里、不在默认搜索列表，需显式指定
+if [ -f "$SIGN_KEYCHAIN" ]; then
+    SIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN")
+fi
+
+if /usr/bin/codesign "${SIGN_ARGS[@]}" "$APP" >/dev/null 2>&1; then
+    echo "[build-app] 已用「${SIGN_IDENTITY}」签名"
+else
+    /usr/bin/codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+    echo "[build-app] 警告：固定身份「${SIGN_IDENTITY}」签名失败，已回落 ad-hoc"
+    echo "[build-app]       ad-hoc 包的录屏授权无法跨版本存活，请勿用于发布"
+fi
+
+if /usr/bin/codesign -d -r- "$APP" 2>&1 | grep -q 'designated => cdhash'; then
+    echo "[build-app] 警告：designated requirement 仍是 cdhash，用户升级后需要重新授权录屏"
+fi
 
 echo "[build-app] 已生成 $APP"
 
 if [ "$INSTALL" = "1" ]; then
     echo "[build-app] 安装到 /Applications ..."
-    pkill -x "$APP_NAME" 2>/dev/null || true
+    pkill -x "$EXEC" 2>/dev/null || true
     rm -rf "/Applications/$APP_NAME.app"
     cp -R "$APP" "/Applications/$APP_NAME.app"
     echo "[build-app] 已安装 /Applications/$APP_NAME.app"
