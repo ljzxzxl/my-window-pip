@@ -9,8 +9,8 @@
 #   bash scripts/build-app.sh --fast       # 只编当前架构，开发期加速
 #
 # 环境变量:
-#   SIGN_IDENTITY  签名身份，默认 "MyWindowPip Signing"（自签证书，保证录屏授权跨版本存活）
-#   SIGN_KEYCHAIN  证书所在 keychain，默认 ~/Library/Keychains/mywindowpip-signing.keychain-db
+#   SIGN_IDENTITY  签名身份，默认 "MyWindowPip Release Signing"（自签证书，保证录屏授权跨版本存活）
+#   SIGN_KEYCHAIN  证书所在 keychain，默认 ~/Library/Keychains/mywindowpip-release.keychain-db
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -90,8 +90,8 @@ fi
 # 签名。必须用固定身份：TCC（录屏授权）记的是 designated requirement，
 # ad-hoc 签名的 requirement 会退化成钉死 cdhash，每次重新编译都算「另一个 App」，
 # 用户升级后就得重新授权、还要手动删掉系统设置里那条同名旧记录。
-SIGN_IDENTITY="${SIGN_IDENTITY:-MyWindowPip Signing}"
-SIGN_KEYCHAIN="${SIGN_KEYCHAIN:-$HOME/Library/Keychains/mywindowpip-signing.keychain-db}"
+SIGN_IDENTITY="${SIGN_IDENTITY:-MyWindowPip Release Signing}"
+SIGN_KEYCHAIN="${SIGN_KEYCHAIN:-$HOME/Library/Keychains/mywindowpip-release.keychain-db}"
 
 SIGN_ARGS=(--force --sign "$SIGN_IDENTITY")
 # 证书在独立 keychain 里、不在默认搜索列表，需显式指定

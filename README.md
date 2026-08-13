@@ -164,8 +164,9 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 |---|---|
 | `Sources/my-window-pip/` | All Swift sources: capture layer (`CaptureEngine`, `ShareableContentStore`, `FrameGate`, `IdleDetector`), presentation layer (`PiPWindowController`, `PiPContentView`, overlay views), session layer (`PiPSession`, `SessionStore`), input layer (hotkeys, event tap, hover monitor, region selection) and foundation (`Models`, `Geo`, `Preferences`, `Permissions`, `Updater`) |
 | `Resources/` | `Info.plist` and the 1024×1024 icon source |
-| `scripts/build-app.sh` | Builds both architectures with `swiftc`, assembles the `.app`, generates `AppIcon.icns`, ad-hoc signs |
+| `scripts/build-app.sh` | Builds both architectures with `swiftc`, assembles the `.app`, generates `AppIcon.icns`, signs with the fixed identity |
 | `scripts/reset-permission.sh` | Resets this app's Screen Recording / Accessibility TCC records |
+| `scripts/ci-import-cert.sh` | CI only: imports the signing certificate from Secrets into a temporary keychain |
 | `packaging/make-dmg.sh` | Produces the DMG and its SHA256 |
 | `docs/` | App icon and the [ONBOARDING](docs/ONBOARDING.md) handover doc (architecture, conventions, pitfalls) |
 | `.github/workflows/release.yml` | Verifies tag vs `VERSION`, builds, publishes the Release |
@@ -314,8 +315,9 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 |---|---|
 | `Sources/my-window-pip/` | 全部 Swift 源码：捕获层（`CaptureEngine`、`ShareableContentStore`、`FrameGate`、`IdleDetector`）、展示层（`PiPWindowController`、`PiPContentView`、控制条与占位视图）、会话层（`PiPSession`、`SessionStore`）、输入层（热键、事件监听、悬停轮询、区域框选）、基础层（`Models`、`Geo`、`Preferences`、`Permissions`、`Updater`） |
 | `Resources/` | `Info.plist` 与 1024×1024 图标源文件 |
-| `scripts/build-app.sh` | 用 `swiftc` 编双架构、组装 `.app`、生成 `AppIcon.icns`、ad-hoc 签名 |
+| `scripts/build-app.sh` | 用 `swiftc` 编双架构、组装 `.app`、生成 `AppIcon.icns`、用固定身份签名 |
 | `scripts/reset-permission.sh` | 重置本应用的屏幕录制 / 辅助功能 TCC 记录 |
+| `scripts/ci-import-cert.sh` | 仅 CI 用：把 Secrets 里的签名证书导入临时 keychain |
 | `packaging/make-dmg.sh` | 打包 DMG 并生成 SHA256 |
 | `docs/` | 应用图标与[交接文档 ONBOARDING](docs/ONBOARDING.md)（架构、约定、踩过的坑） |
 | `.github/workflows/release.yml` | 校验 tag 与 `VERSION` 一致后构建并发布 Release |

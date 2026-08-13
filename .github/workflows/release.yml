@@ -27,25 +27,15 @@ jobs:
       # ad-hoc 签名会退化成钉死 cdhash，用户每次升级都要重新授权录屏。
       - name: 导入签名证书
         env:
-          CERT_P12_BASE64: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          P12: ${{ secrets.SIGNING_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
         run: |
-          if [ -z "$CERT_P12_BASE64" ]; then
-            echo "::error::缺少 Secret SIGNING_CERT_P12_BASE64，发布包必须用固定身份签名"
+          set -o pipefail
+          if ! bash scripts/ci-import-cert.sh 2>&1 | tee /tmp/import.log; then
+            echo "::error::导入签名证书失败，日志末尾："
+            tail -8 /tmp/import.log | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 3600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          printf '%s' "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
-            -T /usr/bin/codesign
-          rm -f "$RUNNER_TEMP/cert.p12"
-          # 允许 codesign 免交互使用私钥
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          echo "SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
       - name: 构建 App（通用二进制）
         run: bash scripts/build-app.sh

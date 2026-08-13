@@ -41,7 +41,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **总览期间的窗口 frame 不可信**：调度中心 / Exposé 打开时 WindowServer 会把窗口等比缩小并内移，`SCWindow.frame` 与 `CGWindowListCopyWindowInfo` 的 bounds 报的都是**变换后**的矩形，而 `isOnScreen` 仍是 true（实测 1600×813 → 1092×555@(102,102)），AX 的 `kAXSize` 则不受影响。任何「按窗口尺寸更新几何」的代码都必须走 `Geo.trustedSourceSize(sampled:current:axSize:)`：有辅助功能权限时以 AX 为权威，没有权限时靠「两轴等比缩小」签名拒绝脏值。历史 bug 就是探测器在总览期间把裁剪框改小，退出后画面永久停在源窗口左上角局部放大。
 - **zoom = 1 时不下发 `sourceRect`**：整窗且未放大时把 `sourceRect` 留成 `.zero`（SCK 语义 = 整个 filter 内容），既让画面天然跟随源窗口尺寸变化，也让几何采样出错时最坏只影响宽高比，不会裁歪画面。窗口内区域捕获与显示器区域捕获仍走显式裁剪。恢复流之后还有一次 1.2 秒的延时几何校正（要大于 `ShareableContentStore` 的 1 秒 TTL 才能拿到新采样）。
 - **精确回源靠私有符号**：AX 没有公开的 `CGWindowID` 属性，`SourceWindowActivator` 用 `dlsym` 动态解析 `_AXUIElementGetWindow`。解析失败会打一条 `Log.warn` 并退到「标题唯一匹配」——同名窗口不唯一时绝不猜（历史 bug 就是回退到 `windows[0]` 抬错窗口）。`--smoke-activate` 会断言符号可用且能反查到捕获中的窗口。
-- **发布包必须用固定身份签名**：TCC 保存的是 App 的 designated requirement。ad-hoc 签名没有证书可锚定，requirement 退化成钉死 cdhash（`designated => cdhash H"…"`），改一个字符重编就算「另一个 App」，用户升级后必须重新授权、还得手动删掉系统设置里那条失效记录。固定身份的 requirement 是 `identifier "com.ljzxzxl.mywindowpip" and certificate root = H"c9d5f608…"`，与二进制内容无关，因此同一张证书签出的所有版本共用一条授权记录。详见下面「发布签名」。
+- **发布包必须用固定身份签名**：TCC 保存的是 App 的 designated requirement。ad-hoc 签名没有证书可锚定，requirement 退化成钉死 cdhash（`designated => cdhash H"…"`），改一个字符重编就算「另一个 App」，用户升级后必须重新授权、还得手动删掉系统设置里那条失效记录。固定身份的 requirement 是 `identifier "com.ljzxzxl.mywindowpip" and certificate root = H"0741c799…"`，与二进制内容无关，因此同一张证书签出的所有版本共用一条授权记录。详见下面「发布签名」。
 
 ## 常用命令
 
@@ -74,22 +74,36 @@ swiftc -typecheck -target x86_64-apple-macos14.0 \
 
 ## 发布签名
 
-`scripts/build-app.sh` 默认用自签证书「MyWindowPip Signing」签名，两个环境变量可覆盖：
+`scripts/build-app.sh` 默认用自签证书「MyWindowPip Release Signing」（SHA-1 `0741C799718B712A1CC3211F3FA9B1A654B331DE`）签名，两个环境变量可覆盖：
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `SIGN_IDENTITY` | `MyWindowPip Signing` | 签名身份名称 |
-| `SIGN_KEYCHAIN` | `~/Library/Keychains/mywindowpip-signing.keychain-db` | 证书所在 keychain；文件存在时才追加 `--keychain` |
+| `SIGN_IDENTITY` | `MyWindowPip Release Signing` | 签名身份名称 |
+| `SIGN_KEYCHAIN` | `~/Library/Keychains/mywindowpip-release.keychain-db` | 证书所在 keychain；文件存在时才追加 `--keychain` |
 
-证书不在默认搜索列表里，所以 `security find-identity -v -p codesigning` 报 0 个身份是正常的，签名时必须显式指定 keychain。签名失败会自动回落 ad-hoc 并打印警告，构建末尾还会断言 requirement 里不含 `cdhash`。**回落后的包不要发布**。
+自签根不被系统信任，所以 `security find-identity -v -p codesigning` 报 0 个身份是正常的（`-v` 会把不受信任的过滤掉），去掉 `-v` 才能看到。**`codesign` 只认搜索列表里的钥匙串**，光传 `--keychain` 找不到身份——踩过这个坑，CI 脚本里因此有 `security list-keychains -d user -s` 一步。签名失败会自动回落 ad-hoc 并打印警告，构建末尾还会断言 requirement 里不含 `cdhash`。**回落后的包不要发布**。
 
-CI（`.github/workflows/release.yml`）从 Secrets 导入证书到临时 keychain 后再构建，缺 `SIGNING_CERT_P12_BASE64` 直接失败，构建后再校验一次签名，最后 `if: always()` 删掉 keychain。一次性导出 `.p12` 的命令：
+> 历史：早先那张同名的「MyWindowPip Signing」（`C9D5F608…`，keychain `mywindowpip-signing.keychain-db`）是用钥匙串助理生成的，私钥导出会弹 GUI 确认框、没法在脚本里非交互导出，因此进不了 CI，已废弃不用。现在这张是 `openssl` 生成后带 `-A` 导入的，可随时重新导出。两张证书都没进过任何发布包，切换不影响用户。
+
+CI（`.github/workflows/release.yml`）调用 `scripts/ci-import-cert.sh`，把 Secrets 里的 `.p12` 导进临时 keychain 后再构建，缺 `SIGNING_CERT_P12_BASE64` 直接失败，构建后再校验一次签名，最后 `if: always()` 删掉 keychain。一次性导出 `.p12` 的命令：
 
 ```bash
-security export -k ~/Library/Keychains/mywindowpip-signing.keychain-db \
-  -t identities -f pkcs12 -o mywindowpip-signing.p12
-base64 -i mywindowpip-signing.p12 | pbcopy   # 粘到 Secret: SIGNING_CERT_P12_BASE64
-                                             # 导出时设的密码存 Secret: SIGNING_CERT_PASSWORD
+# 用 openssl 造一张十年期的代码签名证书（EKU 必须是 codeSigning）
+openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+  -keyout key.pem -out cert.pem -subj "/CN=MyWindowPip Release Signing/O=MyWindowPip" \
+  -addext "basicConstraints=critical,CA:false" \
+  -addext "keyUsage=critical,digitalSignature" \
+  -addext "extendedKeyUsage=critical,codeSigning"
+# 打包成 p12（-legacy：macOS security 读不了 OpenSSL 3 的新默认加密）
+openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem \
+  -name "MyWindowPip Release Signing" -out signing.p12
+# 导入本机 keychain（-A 允许任何程序使用私钥，之后导出不再弹框）
+security create-keychain -p "$KP" ~/Library/Keychains/mywindowpip-release.keychain-db
+security import signing.p12 -k ~/Library/Keychains/mywindowpip-release.keychain-db \
+  -P "$P12_PW" -A -T /usr/bin/codesign -f pkcs12
+# 贴进 GitHub Secrets
+openssl base64 -A -in signing.p12 | pbcopy   # → SIGNING_CERT_P12_BASE64
+                                             # p12 密码 → SIGNING_CERT_PASSWORD
 ```
 
 风险提示：**`.p12` 与密码必须离线备份**。证书丢失或更换意味着 requirement 变化，所有用户都要重新授权一次（届时让他们点权限引导框里的「重置授权记录」）。自签证书不解决 Gatekeeper 首次拦截，那需要 Developer ID + 公证。
