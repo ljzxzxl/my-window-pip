@@ -3,3 +3,6 @@ dist/
 .build/
 .DS_Store
 *.dSYM/
+._*
+.comate
+*.bak
