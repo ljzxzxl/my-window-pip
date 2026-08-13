@@ -21,7 +21,7 @@ enum SelfTest {
             "\(Int($0.frame.width))×\(Int($0.frame.height))@\($0.backingScaleFactor)x"
         }.joined(separator: ", "))
         print("屏幕录制权限：\(Permissions.hasScreenRecording ? "已授权" : "未授权")")
-        print("辅助功能权限：\(Permissions.hasAccessibility ? "已授权" : "未授权（增强模式不可用）")")
+        print("辅助功能权限：\(Permissions.hasAccessibility ? "已授权" : "未授权（精确回源与增强模式不可用）")")
 
         guard Permissions.hasScreenRecording else {
             print("→ 缺少屏幕录制权限，无法验证捕获链路。")

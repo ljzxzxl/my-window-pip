@@ -302,7 +302,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     @objc private func clickToActivateChanged(_ sender: NSButton) {
-        prefs.clickToActivateSource = sender.state == .on
+        let enabled = sender.state == .on
+        prefs.clickToActivateSource = enabled
+        if enabled, !Permissions.hasAccessibility {
+            Permissions.showAccessibilityGuide()
+        }
     }
 
     @objc private func launchAtLoginChanged(_ sender: NSButton) {
