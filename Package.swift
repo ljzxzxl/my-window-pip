@@ -12,5 +12,9 @@ let package = Package(
     ],
     targets: [
         .executableTarget(name: "my-window-pip"),
+        .testTarget(
+            name: "MyWindowPipTests",
+            dependencies: ["my-window-pip"]
+        ),
     ]
 )

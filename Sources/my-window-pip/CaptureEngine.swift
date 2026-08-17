@@ -268,6 +268,7 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
                 Log.debug("restart 合并：距上次重建不足 \(Self.restartCoalesce)s")
                 return
             }
+            self.delegate?.captureWillRestart()
             self.lastRestartUptime = now
             self.pendingConfiguration = nil
             do {

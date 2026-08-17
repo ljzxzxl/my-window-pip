@@ -12,7 +12,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
             ↓                    ↓
 捕获层    CaptureEngine        展示层  PiPWindowController(NSPanel)
           ShareableContentStore         PiPContentView(AVSampleBufferDisplayLayer)
-          FrameGate · IdleDetector      OverlayControlsView · PlaceholderView
+          FrameGate · IdleDetector      RenderBackpressureMonitor · OverlayControlsView · PlaceholderView
             ↓
 基础层    Models(契约) · Geo(坐标/缩放数学) · Preferences · Permissions · L10n · Log · Updater · LoginItem
 ```
@@ -21,7 +21,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 
 1. 输入层产生动作 → `SessionStore` 构造 `SessionRequest` → 新建 `PiPSession`
 2. `PiPSession` 同时持有 `CaptureEngine` 与 `PiPWindowController`，两者互不引用
-3. 帧：`SCStream` → 捕获串行队列 → `FrameGate.accept`（只放行 `.complete`）→ `IdleDetector.feed` → 主线程 → `AVSampleBufferDisplayLayer.enqueue`
+3. 帧：`SCStream` → 捕获串行队列 → `FrameGate.accept`（只放行 `.complete`）→ `IdleDetector.feed` → 主线程 → `sampleBufferRenderer.enqueue`
 4. 交互：视图手势 → `PiPWindowDelegate` → 改 `PiPSessionState` → `Geo.sourceRect` 算裁剪 → `CaptureEngine.retune`
 
 ## 关键约定
@@ -30,6 +30,8 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **缩放不重建流**：改的是 `SCStreamConfiguration.sourceRect` + `width/height`，通过 `updateConfiguration` 下发；`CaptureEngine.restart()` 只作为兜底。
 - **帧回调不碰 UI**：回调在 `com.ljzxzxl.mywindowpip.capture` 串行队列，任何 UI 操作都要 `DispatchQueue.main.async`。
 - **不跨帧持有 `CMSampleBuffer`**，`queueDepth = 3`，宁丢帧不积压。
+- **捕获健康与渲染健康分开监控**：`CaptureEngine` 的 watchdog 只判断 SCK 是否持续产帧；`RenderBackpressureMonitor` 判断 renderer 是否持续接收帧。短暂 not-ready 正常丢帧，连续 2 秒则按 `flush → 重建 display layer → 重启捕获流` 分级恢复。macOS 14+ 只通过 `AVSampleBufferDisplayLayer.sampleBufferRenderer` 查询状态、enqueue 和 flush，不要混用 display layer 上已废弃的旧队列 API。
+- **流不连续必须重置 renderer 时间线**：pause/resume、restart、源窗口重匹配、输出像素尺寸变化或 PTS 回退时，先 flush 旧队列并保留最后画面；普通平移/缩放且输出格式不变时不要无条件 flush，以免闪烁。
 - **防镜中镜**：浮窗 `sharingType = .none`；窗口枚举过滤自身 App；区域捕获的显示器过滤器按 App 排除自己。
 - **零权限优先**：任何功能都必须能在「只有屏幕录制权限」的前提下通过控制条或右键菜单完成；辅助功能权限只允许作为增强项。
 - **不用系统 tooltip**：浮窗 level 是 `.screenSaver`(1000)，系统 tooltip 窗口层级更低会被压在浮窗后面，而且初始延迟不可调。所有浮窗内的提示统一走 `PiPWindowController.showHint(_:near:duration:)`，它用一个 `addChildWindow` 挂在浮窗上的**子窗口**承载（这样才能画到浮窗顶边之外、显示在图标上方），子窗口必须 `ignoresMouseEvents = true`。新增按钮时把提示文案登记到 `OverlayControlsView` 的 hint 映射里，不要再写 `toolTip`。
@@ -47,6 +49,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 
 ```bash
 bash scripts/build-app.sh --fast --debug     # 开发期快速构建（单架构 + 日志 + 自检断言）
+swift test                                  # renderer 背压与自愈状态机测试
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --selftest              # 权限与捕获链路自检
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke 10              # 自动开一路 PiP 跑 10 秒再退出
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke 60 --smoke-sessions 4   # 多路并发压测
@@ -128,6 +131,7 @@ codesign -d -r- build/MyWindowPip.app 2>&1 | grep 'designated =>'   # 不应出�
 ## 排查提示
 
 - 浮窗一片黑：先跑 `--selftest`。若权限正常但收不到帧，多半是源窗口最小化（系统不产帧）或流被 `FrameGate` 全过滤（画面完全静止）。
+- 浮窗停在旧画面但源窗口仍在变化：看 `--debug` 日志中的 `renderer 开始背压 / 卡流恢复 / 已重建 display layer`。不要只看 `CaptureEngine` 是否收帧——历史 bug 正是捕获持续正常、单个 renderer 队列却永久 not-ready。
 - 改帧率没反应：确认 `IdleDetector` 没把它压到 1 fps（`--debug` 日志里有「静止检测」记录）。
 - 热键没反应：`HotkeyManager.failedActions` 非空说明被别的应用占用，设置页会提示；`fn` 组合键必须开增强模式。
 - 增强模式突然失灵：系统会在负载高时禁用事件监听，`EventTapManager` 已监听 `tapDisabledByTimeout` 自动恢复，日志里能看到告警。

@@ -162,7 +162,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             engine.pause()
             update(runtimeState: .paused)
         } else {
-            engine.resume()
+            resumeCapture(reason: "暂停后恢复")
             update(runtimeState: .streaming)
         }
         windowController.update(state: state)
@@ -284,7 +284,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         hiddenAutoCloseTimer?.invalidate()
         hiddenAutoCloseTimer = nil
         windowController.restoreFromHidden()
-        if !state.isPaused { engine.resume() }
+        if !state.isPaused { resumeCapture(reason: "完全隐藏后恢复") }
         windowController.update(state: state)
     }
 
@@ -319,6 +319,18 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private func retune() {
         guard engine.isRunning else { return }
         engine.retune(makeConfiguration())
+    }
+
+    /// 恢复流前先清理 renderer 的旧队列；只在 engine 确实处于暂停态时执行。
+    private func resumeCapture(reason: String) {
+        guard engine.isPaused else { return }
+        windowController.prepareForCaptureDiscontinuity(reason)
+        engine.resume()
+    }
+
+    private func restartCapture(reason: String) {
+        Log.debug("请求重启捕获流：\(reason)")
+        engine.restart()
     }
 
     private func startCapture() {
@@ -425,6 +437,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     // MARK: - CaptureEngineDelegate
 
+    func captureWillRestart() {
+        windowController.prepareForCaptureDiscontinuity("捕获流即将重建")
+    }
+
     func captureDidOutput(_ sampleBuffer: CMSampleBuffer) {
         if state.idleDetection,
            let verdict = idleDetector.feed(sampleBuffer, activeFPS: state.fps.rawValue) {
@@ -489,7 +505,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                     self.probeTimer = nil
                     self.syncBaseRectIfNeeded(with: window)
                     self.engine.retarget(CaptureEngine.filter(for: window))
-                    self.engine.restart()
+                    self.restartCapture(reason: "源窗口恢复")
                     self.update(runtimeState: .streaming)
                     // 恢复瞬间可能落在退出总览的动画中间态，稍后再确认一次几何
                     self.scheduleGeometryRecheck()
@@ -498,7 +514,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 }
             }
         case .region:
-            engine.restart()
+            restartCapture(reason: "区域捕获恢复")
         }
     }
 
@@ -514,6 +530,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.isClosed else { return }
             Log.debug("第 \(self.reconnectAttempt) 次重连")
+            self.windowController.prepareForCaptureDiscontinuity("捕获流重连")
             self.engine.stop()
             self.startCapture()
         }
@@ -546,6 +563,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             self.probeTimer?.invalidate()
             self.probeTimer = nil
             self.reconnectAttempt = 0
+            self.windowController.prepareForCaptureDiscontinuity("源窗口重新匹配")
             self.engine.stop()
             self.startStream(filter: CaptureEngine.filter(for: window))
         }
@@ -638,7 +656,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         windowController.setAlpha(1, animated: true)
         windowController.setClickThrough(false)
         windowController.setControlsVisible(true)
-        if !state.isPaused, !state.isHidden { engine.resume() }
+        if !state.isPaused, !state.isHidden { resumeCapture(reason: "自动隐藏临时唤回") }
         switch reason {
         case .option:
             windowController.showHint(L.t("松开 ⌥ 恢复透明", "Release ⌥ to fade again"), near: nil)
@@ -656,7 +674,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         windowController.setAlpha(1, animated: true)
         windowController.setClickThrough(false)
         windowController.setControlsVisible(false)
-        if !state.isPaused, !state.isHidden { engine.resume() }
+        if !state.isPaused, !state.isHidden { resumeCapture(reason: "自动隐藏结束") }
     }
 
     // MARK: - 遮挡时暂停
@@ -670,7 +688,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             guard let self, !self.isClosed, !self.state.isPaused, !self.state.isHidden else { return }
             let visible = self.windowController.window.occlusionState.contains(.visible)
             if visible {
-                self.engine.resume()
+                self.resumeCapture(reason: "浮窗重新可见")
                 // 遮挡期间（例如调度中心盖住浮窗）源窗口可能改过尺寸，恢复后确认一次
                 self.scheduleGeometryRecheck()
             } else {
@@ -725,6 +743,12 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func pipRequestToggleIdleDetection() { toggleIdleDetection() }
 
     func pipRequestTogglePause() { setPaused(!state.isPaused) }
+
+    func pipRendererRecoveryExhausted() {
+        guard !isClosed, !state.isPaused, !state.isHidden else { return }
+        Log.warn("显示层自愈失败，升级为重启捕获流：\(state.source.displayTitle)")
+        restartCapture(reason: "renderer 自愈耗尽")
+    }
 
     func pipRequestActivateSource() { activateSource() }
 

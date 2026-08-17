@@ -401,6 +401,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
             self?.delegate?.pipRequestToggleIdleDetection()
         }
         contentView.onRequestTogglePause = { [weak self] in self?.delegate?.pipRequestTogglePause() }
+        contentView.onRendererRecoveryExhausted = { [weak self] in
+            self?.delegate?.pipRendererRecoveryExhausted()
+        }
         // 干净的单击（无修饰键、未拖动）→ 请求切回源应用
         contentView.onRequestActivateSource = { [weak self] in
             self?.delegate?.pipRequestActivateSource()
@@ -644,6 +647,11 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         contentView.enqueue(sampleBuffer)
     }
 
+    /// 捕获流即将 resume / restart：清掉旧 renderer 队列，避免新旧 PTS/格式混用。
+    func prepareForCaptureDiscontinuity(_ reason: String) {
+        contentView.prepareForCaptureDiscontinuity(reason)
+    }
+
     // MARK: - 状态同步
 
     func update(state: PiPSessionState) {
@@ -680,6 +688,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     func setTitle(_ title: String) {
         titleText = title
         panel.title = title
+        contentView.setDiagnosticLabel(title)
         overlay.titleText = title
         titleItem.title = title
     }

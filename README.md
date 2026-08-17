@@ -141,6 +141,7 @@ bash scripts/build-app.sh --fast       # current architecture only
 bash scripts/build-app.sh --debug      # DEBUG logging + geometry self-checks
 bash scripts/build-app.sh --install    # also install to /Applications
 bash packaging/make-dmg.sh             # dist/MyWindowPip-<version>.dmg + SHA256
+swift test                             # deterministic renderer recovery tests
 ```
 
 Built-in self-tests (no UI, useful after any change):
@@ -156,19 +157,22 @@ Built-in self-tests (no UI, useful after any change):
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # real download + SHA256 check
 ```
 
-Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishes a GitHub Release.
+Pull requests and pushes to `main` run the warning-free build and unit tests on macOS 14. Pushing a
+`v*` tag (matching `VERSION`) repeats those checks, builds the universal binary and publishes a GitHub Release.
 
 ### Repository layout
 
 | Path | Purpose |
 |---|---|
 | `Sources/my-window-pip/` | All Swift sources: capture layer (`CaptureEngine`, `ShareableContentStore`, `FrameGate`, `IdleDetector`), presentation layer (`PiPWindowController`, `PiPContentView`, overlay views), session layer (`PiPSession`, `SessionStore`), input layer (hotkeys, event tap, hover monitor, region selection) and foundation (`Models`, `Geo`, `Preferences`, `Permissions`, `Updater`) |
+| `Tests/MyWindowPipTests/` | Deterministic unit tests for renderer backpressure and recovery escalation |
 | `Resources/` | `Info.plist` and the 1024×1024 icon source |
 | `scripts/build-app.sh` | Builds both architectures with `swiftc`, assembles the `.app`, generates `AppIcon.icns`, signs with the fixed identity |
 | `scripts/reset-permission.sh` | Resets this app's Screen Recording / Accessibility TCC records |
 | `scripts/ci-import-cert.sh` | CI only: imports the signing certificate from Secrets into a temporary keychain |
 | `packaging/make-dmg.sh` | Produces the DMG and its SHA256 |
 | `docs/` | App icon and the [ONBOARDING](docs/ONBOARDING.md) handover doc (architecture, conventions, pitfalls) |
+| `.github/workflows/ci.yml` | Builds with warnings as errors and runs unit tests on pull requests and `main` |
 | `.github/workflows/release.yml` | Verifies tag vs `VERSION`, builds, publishes the Release |
 
 ### Notes
@@ -292,6 +296,7 @@ bash scripts/build-app.sh --fast       # 只编当前架构，开发期更快
 bash scripts/build-app.sh --debug      # 带 DEBUG 日志与几何自检
 bash scripts/build-app.sh --install    # 顺带安装到 /Applications
 bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + SHA256
+swift test                             # renderer 背压与自愈状态机单元测试
 ```
 
 内置自检（不开界面，改完代码跑一遍最省事）：
@@ -307,19 +312,22 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # 真实下载 + SHA256 校验
 ```
 
-推送与 `VERSION` 一致的 `v*` tag 会自动构建通用二进制并发布 Release。
+PR 与推送到 `main` 会在 macOS 14 上执行零警告编译和单元测试；推送与 `VERSION` 一致的
+`v*` tag 会重复这些检查，再构建通用二进制并发布 Release。
 
 ### 仓库结构
 
 | 路径 | 用途 |
 |---|---|
 | `Sources/my-window-pip/` | 全部 Swift 源码：捕获层（`CaptureEngine`、`ShareableContentStore`、`FrameGate`、`IdleDetector`）、展示层（`PiPWindowController`、`PiPContentView`、控制条与占位视图）、会话层（`PiPSession`、`SessionStore`）、输入层（热键、事件监听、悬停轮询、区域框选）、基础层（`Models`、`Geo`、`Preferences`、`Permissions`、`Updater`） |
+| `Tests/MyWindowPipTests/` | renderer 背压检测与分级自愈的确定性单元测试 |
 | `Resources/` | `Info.plist` 与 1024×1024 图标源文件 |
 | `scripts/build-app.sh` | 用 `swiftc` 编双架构、组装 `.app`、生成 `AppIcon.icns`、用固定身份签名 |
 | `scripts/reset-permission.sh` | 重置本应用的屏幕录制 / 辅助功能 TCC 记录 |
 | `scripts/ci-import-cert.sh` | 仅 CI 用：把 Secrets 里的签名证书导入临时 keychain |
 | `packaging/make-dmg.sh` | 打包 DMG 并生成 SHA256 |
 | `docs/` | 应用图标与[交接文档 ONBOARDING](docs/ONBOARDING.md)（架构、约定、踩过的坑） |
+| `.github/workflows/ci.yml` | 在 PR 与 `main` 上将警告视为错误地编译，并运行单元测试 |
 | `.github/workflows/release.yml` | 校验 tag 与 `VERSION` 一致后构建并发布 Release |
 
 ### 说明
