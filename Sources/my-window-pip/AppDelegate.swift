@@ -26,15 +26,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.warn("增强模式无法启用（辅助功能权限缺失），已回退到零权限模式")
         }
 
-        // 首次运行且未授权时：先向系统申请（这一步会弹系统授权框，并把本应用登记进
-        // 「屏幕录制与系统录音」列表，用户直接开开关即可，不用手动点加号），
-        // 仍未授权才显示我们的引导框。菜单栏的告警项会在下次打开菜单时自动消失。
-        if !Permissions.hasScreenRecording {
+        // 首次运行且未授权时只向系统申请（会弹系统授权框，并把本应用登记进
+        // 「屏幕录制与系统录音」列表）；App 自己的引导留到用户之后仍主动触发捕获时，
+        // 避免两层弹窗叠在一起。菜单栏的告警项会在下次打开菜单时自动消失。
+        let hadScreenRecordingPermission = Permissions.hasScreenRecording
+        if !hadScreenRecordingPermission {
             Permissions.ensureScreenRecording()
+        } else {
+            // 全 Space 的首次枚举比原来的 onscreen 查询更重；启动后立即在后台预热缓存，
+            // 避免用户第一次展开「选择窗口」时才看到加载占位。refresh 本身异步，不阻塞启动。
+            ShareableContentStore.shared.refresh { result in
+                switch result {
+                case let .success(windows):
+                    Log.debug("窗口列表预热完成：\(windows.count) 个候选窗口")
+                case let .failure(error):
+                    Log.warn("窗口列表预热失败：\(error.localizedDescription)")
+                }
+            }
         }
 
-        // 权限流程走完之后再弹首启引导，避免和系统授权框叠弹
-        if !Preferences.shared.hasSeenOnboarding {
+        // 未授权的首次启动只显示系统授权框；上手引导留到授权并重启后，避免两层 UI 叠弹。
+        if hadScreenRecordingPermission, !Preferences.shared.hasSeenOnboarding {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 self?.showOnboarding(markAsSeen: true)
             }
@@ -388,11 +400,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SessionStore.shared.pipFrontmostWindow()
                 return
             }
-            // 多路并发：取面积最大的前 N 个普通窗口
+            // 多路并发：全量枚举包含其他 Space / 最小化窗口，自检只取当前在屏的普通窗口
             ShareableContentStore.shared.refresh { result in
                 guard case let .success(windows) = result else { return }
                 let targets = windows
-                    .filter { $0.windowLayer == 0 }
+                    .filter { $0.isOnScreen && $0.windowLayer == 0 }
                     .sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
                     .prefix(sessionCount)
                 for window in targets { SessionStore.shared.pip(window: window) }

@@ -85,7 +85,10 @@ final class SessionStore {
             idleDetection: Preferences.shared.idleDetectionDefault
         )
         add(PiPSession(request: request, cascadeIndex: sessions.count))
-        Log.info("新建窗口 PiP：\(source.displayTitle) @ \(request.fps.label)")
+        Log.info("""
+            新建窗口 PiP：\(source.displayTitle) @ \(request.fps.label) \
+            [windowID=\(window.windowID), isOnScreen=\(window.isOnScreen), isActive=\(window.isActive)]
+            """)
     }
 
     /// 区域捕获（热键 / 菜单入口）

@@ -45,9 +45,11 @@ enum SelfTest {
             return 3
         }
         print("可捕获窗口：\(windows.count) 个")
+        // 全量枚举包含其他 Space 与最小化窗口；自检必须只挑当前能稳定产出帧的 onscreen 窗口。
+        let onScreen = windows.filter { $0.isOnScreen }
         // 优先挑普通层（windowLayer == 0）的最大窗口，避免选到 Dock 这类系统层窗口
-        let normalLayer = windows.filter { $0.windowLayer == 0 }
-        let pool = normalLayer.isEmpty ? windows : normalLayer
+        let normalLayer = onScreen.filter { $0.windowLayer == 0 }
+        let pool = normalLayer.isEmpty ? onScreen : normalLayer
         guard let target = pool.max(by: {
             $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
         }) else {

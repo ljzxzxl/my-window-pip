@@ -7,6 +7,10 @@ enum Permissions {
 
     // MARK: - 屏幕录制
 
+    /// 本进程是否已经触发过一次系统授权请求。只在主线程访问；用于避免系统授权框刚出现，
+    /// `ensureScreenRecording()` 就立刻再叠一层 App 自己的说明框。
+    private static var didRequestScreenRecordingThisLaunch = false
+
     /// 不弹窗的预检。
     static var hasScreenRecording: Bool { CGPreflightScreenCaptureAccess() }
 
@@ -23,6 +27,7 @@ enum Permissions {
     /// 2. 再发一次 ScreenCaptureKit 查询，确保 SCK 侧也完成登记（失败被系统吞掉是正常的）
     @discardableResult
     static func primeRegistration() -> Bool {
+        didRequestScreenRecordingThisLaunch = true
         let granted = CGRequestScreenCaptureAccess()
         Task.detached(priority: .utility) {
             _ = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
@@ -30,13 +35,19 @@ enum Permissions {
         return granted
     }
 
-    /// 确保拥有屏幕录制权限：先向系统申请（顺带完成列表登记），仍未授权才显示引导。
+    /// 确保拥有屏幕录制权限。
+    ///
+    /// 首次调用只发起 macOS 系统授权：系统弹窗是实际授予 TCC 权限的唯一入口，不与 App
+    /// 自己的说明框叠加。若本次启动已经请求过、用户之后仍主动触发捕获或点击权限菜单，
+    /// 才显示 App 引导，提供系统设置、重置记录与重启入口。
     @discardableResult
     static func ensureScreenRecording() -> Bool {
         if hasScreenRecording { return true }
-        if primeRegistration() { return true }
-        // 系统弹窗是异步的，用户可能刚点了「允许」，复检一次避免多弹一个框
-        if hasScreenRecording { return true }
+        if !didRequestScreenRecordingThisLaunch {
+            _ = primeRegistration()
+            // 系统授权可能要求重启应用才生效；这里只复检，不在同一轮再弹 App 引导。
+            return hasScreenRecording
+        }
         showScreenRecordingGuide()
         return false
     }

@@ -235,10 +235,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
             for window in group.windows {
                 let title = ShareableContentStore.shared.displayTitle(for: window)
-                let item = NSMenuItem(title: "  \(title)", action: #selector(pipWindow(_:)),
+                // SCK 没有公开字段区分「其他 Space」与「已最小化」；测试版把两者都保留，
+                // 并明确标记，便于验证非当前 Space 的窗口能否持续产出实时帧。
+                let availability = window.isOnScreen ? "" : L.t("（未显示）", " (not visible)")
+                let item = NSMenuItem(title: "  \(title)\(availability)", action: #selector(pipWindow(_:)),
                                       keyEquivalent: "")
                 item.target = self
                 item.representedObject = NSNumber(value: window.windowID)
+                item.toolTip = window.isOnScreen
+                    ? "windowID=\(window.windowID) · isActive=\(window.isActive)"
+                    : L.t(
+                        "窗口位于其他 Space、屏幕外或已最小化 · windowID=\(window.windowID) · isActive=\(window.isActive)",
+                        "Window is in another Space, offscreen, or minimized · windowID=\(window.windowID) · isActive=\(window.isActive)"
+                    )
                 if store.session(windowID: window.windowID) != nil {
                     item.state = .on   // 已经有浮窗
                 }
