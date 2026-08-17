@@ -20,6 +20,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     /// 关闭回调（由 SessionStore 注入）
     var onClose: ((PiPSession) -> Void)?
+    /// 拖动中的磁吸解析（由持有全部会话的 SessionStore 注入）
+    var onResolveDragFrame: ((CGRect, NSEvent.ModifierFlags) -> CGRect)?
 
     // 运行期辅助状态
     private var isAutoHidden = false
@@ -68,7 +70,6 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             title: request.source.displayTitle,
             aspect: request.sourcePointSize,
             initialWidth: width,
-            origin: prefs.origin(for: request.source.preferenceKey),
             levelMode: prefs.windowLevelMode,
             cascadeIndex: cascadeIndex
         )
@@ -97,7 +98,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         hiddenAutoCloseTimer?.invalidate()
         HoverMonitor.shared.unregister(id: id)
         engine.stop()
-        persistGeometry()
+        persistPreferredWidth()
         windowController.close()
         Log.info("会话关闭：\(state.source.displayTitle)")
         onClose?(self)
@@ -109,6 +110,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     var title: String { state.source.displayTitle }
     var isHidden: Bool { state.isHidden }
     var isPaused: Bool { state.isPaused }
+    var windowFrame: CGRect { windowController.window.frame }
 
     func bringToFront() { windowController.bringToFront() }
     func flashHighlight() { windowController.flashHighlight() }
@@ -688,10 +690,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         retune()
     }
 
-    private func persistGeometry() {
+    private func persistPreferredWidth() {
         let key = state.source.preferenceKey
         Preferences.shared.setPreferredWidth(windowController.contentPointSize.width, for: key)
-        Preferences.shared.setOrigin(windowController.frameOrigin, for: key)
     }
 
     // MARK: - PiPWindowDelegate
@@ -812,7 +813,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     func pipMenuWillOpen() { refreshSourceTitleNow() }
 
-    func pipDidMove() {
-        Preferences.shared.setOrigin(windowController.frameOrigin, for: state.source.preferenceKey)
+    func pipResolveDragFrame(_ proposedFrame: CGRect,
+                             modifierFlags: NSEvent.ModifierFlags) -> CGRect {
+        onResolveDragFrame?(proposedFrame, modifierFlags) ?? proposedFrame
     }
 }

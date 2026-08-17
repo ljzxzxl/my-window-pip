@@ -177,6 +177,10 @@ final class SessionStore {
     // MARK: - 内部
 
     private func add(_ session: PiPSession) {
+        session.onResolveDragFrame = { [weak self, weak session] proposed, flags in
+            guard let self, let session else { return proposed }
+            return self.resolveDragFrame(for: session, proposed: proposed, modifierFlags: flags)
+        }
         session.onClose = { [weak self] closed in
             guard let self else { return }
             self.sessions.removeAll { $0 === closed }
@@ -184,6 +188,63 @@ final class SessionStore {
         }
         sessions.append(session)
         onChange?()
+    }
+
+    /// 拖动 PiP 时吸附到当前屏幕边缘或同屏的其他 PiP。
+    /// 按住 Control 临时绕过磁吸，方便做像素级自由摆放。
+    private func resolveDragFrame(for moving: PiPSession, proposed: CGRect,
+                                  modifierFlags: NSEvent.ModifierFlags) -> CGRect {
+        guard !modifierFlags.contains(.control),
+              let screen = targetScreen(for: proposed) else { return proposed }
+        let visibleFrame = screen.visibleFrame
+        let siblings = sessions.compactMap { session -> CGRect? in
+            guard session !== moving, !session.isHidden else { return nil }
+            let frame = session.windowFrame
+            // 只让「主要位于同一显示器」的 PiP 参与磁吸；跨屏窗口只露过来一点不算。
+            guard let siblingScreen = targetScreen(for: frame),
+                  isSameDisplay(siblingScreen, screen) else { return nil }
+            return frame
+        }
+        return Geo.snappedWindowFrame(proposed, in: visibleFrame, siblings: siblings)
+    }
+
+    /// 跨屏拖动时取与窗口重叠面积最大的屏幕，避免固定使用 `NSScreen.main`。
+    private func targetScreen(for frame: CGRect) -> NSScreen? {
+        let screens = NSScreen.screens
+        guard let best = screens.max(by: { lhs, rhs in
+            // 屏幕归属用完整 frame 判定；visibleFrame 排除 Dock / 菜单栏，
+            // 只适合作为最终的磁吸安全边界。
+            overlapArea(lhs.frame, frame) < overlapArea(rhs.frame, frame)
+        }) else { return nil }
+        if overlapArea(best.frame, frame) > 0 { return best }
+
+        // 极快拖动可能让 proposed frame 短暂落在显示器之间的空洞；
+        // 此时选距窗口中心最近的屏幕，不依赖数组顺序的平局结果。
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        return screens.min {
+            squaredDistance(from: center, to: $0.frame) < squaredDistance(from: center, to: $1.frame)
+        }
+    }
+
+    private func overlapArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        return intersection.isNull ? 0 : intersection.width * intersection.height
+    }
+
+    private func squaredDistance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx = max(max(rect.minX - point.x, 0), point.x - rect.maxX)
+        let dy = max(max(rect.minY - point.y, 0), point.y - rect.maxY)
+        return dx * dx + dy * dy
+    }
+
+    private func isSameDisplay(_ lhs: NSScreen, _ rhs: NSScreen) -> Bool {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        if let left = (lhs.deviceDescription[key] as? NSNumber)?.uint32Value,
+           let right = (rhs.deviceDescription[key] as? NSNumber)?.uint32Value {
+            return left == right
+        }
+        // 理论上 NSScreenNumber 始终存在；保留 frame 降级，避免依赖 NSScreen 对象身份稳定。
+        return lhs.frame == rhs.frame
     }
 
     private func confirmIfOverLimit() -> Bool {

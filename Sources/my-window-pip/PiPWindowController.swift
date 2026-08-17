@@ -196,8 +196,6 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     /// 当前所在屏幕的 backingScaleFactor
     var backingScale: CGFloat { panel.screen?.backingScaleFactor ?? panel.backingScaleFactor }
 
-    var frameOrigin: CGPoint { panel.frame.origin }
-
     /// 供 HoverMonitor 校验鼠标是否落在本浮窗上
     var isHoveringMouse: Bool {
         guard panel.isVisible else { return false }
@@ -272,9 +270,8 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     /// - Parameters:
     ///   - aspect: 源画面宽高比
     ///   - initialWidth: 初始逻辑宽度（会被 clamp 到 `minWidth` 以上）
-    ///   - origin: 可选的记忆位置（AppKit 全局坐标，左下原点）；为 nil 时用主屏右下角
-    ///   - cascadeIndex: 已存在的浮窗数量，用于错位摆放（origin 为 nil 时生效）
-    init(title: String, aspect: CGSize, initialWidth: CGFloat, origin: CGPoint?,
+    ///   - cascadeIndex: 已存在的浮窗数量，用于错位摆放
+    init(title: String, aspect: CGSize, initialWidth: CGFloat,
          levelMode: WindowLevelMode, cascadeIndex: Int = 0) {
         let safeAspect = Self.sanitized(aspect)
         self.aspect = safeAspect
@@ -282,7 +279,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         self.levelMode = levelMode
 
         let frame = Self.initialFrame(aspect: safeAspect, width: initialWidth,
-                                     origin: origin, cascadeIndex: cascadeIndex)
+                                      cascadeIndex: cascadeIndex)
         panel = PiPPanel(
             contentRect: frame,
             styleMask: [.nonactivatingPanel, .borderless, .resizable, .fullSizeContentView],
@@ -323,14 +320,11 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     }
 
     private static func initialFrame(aspect: CGSize, width: CGFloat,
-                                     origin: CGPoint?, cascadeIndex: Int) -> CGRect {
+                                     cascadeIndex: Int) -> CGRect {
         let w = max(minWidth, width.rounded())
         let h = max(90, (w * aspect.height / aspect.width).rounded())
         let size = CGSize(width: w, height: h)
 
-        if let origin {
-            return Geo.constrainToVisibleScreens(CGRect(origin: origin, size: size))
-        }
         // 默认：主屏右下角内缩 24pt，并按已有浮窗数量向左上错位
         let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
@@ -405,11 +399,12 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         contentView.onRequestActivateSource = { [weak self] in
             self?.delegate?.pipRequestActivateSource()
         }
-        // 手动拖动结束：位置持久化 + 跨屏后按新 scale 重新出流（系统拖动时这两件事由 windowDidMove 做）
+        contentView.onResolveDraggedWindowFrame = { [weak self] proposed, flags in
+            self?.delegate?.pipResolveDragFrame(proposed, modifierFlags: flags) ?? proposed
+        }
+        // 手动拖动结束：再确认一次跨屏 scale（拖动中的 windowDidMove 也会检查）
         contentView.onDidDragWindow = { [weak self] in
-            guard let self else { return }
-            self.delegate?.pipDidMove()
-            self.notifyIfScaleChanged()
+            self?.notifyIfScaleChanged()
         }
 
         overlay.onClose = { [weak self] in self?.delegate?.pipRequestClose() }
@@ -777,7 +772,6 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
-        delegate?.pipDidMove()
         notifyIfScaleChanged()
     }
 
@@ -818,7 +812,6 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         let corrected = Geo.constrainToVisibleScreens(panel.frame)
         if corrected != panel.frame {
             panel.setFrame(corrected, display: true)
-            delegate?.pipDidMove()
         }
         notifyIfScaleChanged()
     }

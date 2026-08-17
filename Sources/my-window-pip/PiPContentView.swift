@@ -23,7 +23,10 @@ final class PiPContentView: NSView {
     var onRequestCycleFPS: (() -> Void)?
     var onRequestToggleIdleDetection: (() -> Void)?
     var onRequestTogglePause: (() -> Void)?
-    /// 手动拖动窗口结束（本次按下确实移动过窗口）：上层据此持久化位置、处理跨屏 scale 变化
+    /// 拖动中的原始 frame → 经屏幕 / 其他 PiP 磁吸修正后的 frame。
+    /// 最终只使用返回值的 origin，避免「移动」手势意外改变窗口尺寸。
+    var onResolveDraggedWindowFrame: ((CGRect, NSEvent.ModifierFlags) -> CGRect)?
+    /// 手动拖动窗口结束（本次按下确实移动过窗口）：上层据此确认跨屏 scale 变化
     var onDidDragWindow: (() -> Void)?
     /// 干净的单击（未拖动、`clickCount == 1`、无 Cmd/⌥/⌃/⇧）：请求切回源应用
     var onRequestActivateSource: (() -> Void)?
@@ -239,6 +242,8 @@ final class PiPContentView: NSView {
 
         var frame = window.frame
         frame.origin = CGPoint(x: (startOrigin.x + dx).rounded(), y: (startOrigin.y + dy).rounded())
+        let resolved = onResolveDraggedWindowFrame?(frame, event.modifierFlags) ?? frame
+        frame.origin = resolved.origin
         // 安全网：只有整窗跑到所有屏幕可见区域之外时才会被拉回，正常拖动（含跨屏）不受影响
         window.setFrameOrigin(Geo.constrainToVisibleScreens(frame).origin)
     }

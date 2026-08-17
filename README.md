@@ -41,7 +41,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 **Picture-in-Picture**
 - Turn the frontmost window into a PiP with one hotkey (`⌃⌥P`), or pick a window from the menu bar list.
 - Capture any screen region (`⌃⌥⇧P`); if the selection lands inside a window, a window stream is used instead, so it follows the window and keeps working when the window is covered.
-- Multiple PiP windows at once, cascaded automatically; position and width remembered per app.
+- Multiple PiP windows at once, cascaded automatically; width remembered per app, while positions start fresh to avoid collisions between windows from the same app.
 - Floating, borderless, aspect-locked, visible on all Spaces and above full-screen apps.
 
 **Zoom & pan**
@@ -192,7 +192,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 **画中画**
 - 一键把前台窗口变浮窗（`⌃⌥P`），或从菜单栏窗口列表里挑。
 - 框选任意屏幕区域做画中画（`⌃⌥⇧P`）；选区落在某个窗口内时自动改用窗口流，可跟随窗口移动、被遮挡也能捕获。
-- 多个浮窗同时运行，自动错位摆放，位置与宽度按应用记忆。
+- 多个浮窗同时运行，每次新建时自动错位摆放；宽度按应用记忆，位置不按应用持久化，避免同一应用的多个窗口重叠。
 - 浮窗置顶、可在所有 Space 与全屏应用之上显示、无边框、锁定宽高比。
 
 **缩放与平移**

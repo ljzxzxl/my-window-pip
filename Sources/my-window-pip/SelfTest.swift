@@ -14,6 +14,10 @@ enum SelfTest {
 
     /// 返回进程退出码。
     static func run() -> Int32 {
+        #if DEBUG
+        Geo.runSelfChecks()
+        print("几何自检：通过")
+        #endif
         print("MyWindowPip 自检 v\(Updater.currentVersion)")
         print("系统：\(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("架构：\(machineArch())")
