@@ -3,6 +3,30 @@ import XCTest
 
 final class RendererDiagnosticsTests: XCTestCase {
 
+    func testIncidentTimingSeparatesFullStallFromRecoveryLatency() {
+        let timing = RendererIncidentTiming(
+            stallStartedAt: 10,
+            detectedAt: 12,
+            recoveredAt: 12.2,
+            lastPhaseDuration: 0.2
+        )
+
+        XCTAssertEqual(timing.stallDuration, 2.2, accuracy: 0.001)
+        XCTAssertEqual(timing.recoveryDuration, 0.2, accuracy: 0.001)
+    }
+
+    func testIncidentTimingFallsBackToLastPhaseDuration() {
+        let timing = RendererIncidentTiming(
+            stallStartedAt: nil,
+            detectedAt: nil,
+            recoveredAt: 12.2,
+            lastPhaseDuration: 0.2
+        )
+
+        XCTAssertEqual(timing.stallDuration, 0.2, accuracy: 0.001)
+        XCTAssertEqual(timing.recoveryDuration, 0, accuracy: 0.001)
+    }
+
     func testRingBufferKeepsNewestEvents() {
         var diagnostics = RendererDiagnostics(capacity: 2)
 
@@ -39,5 +63,23 @@ final class RendererDiagnosticsTests: XCTestCase {
     func testCapacityHasSafeLowerBound() {
         let diagnostics = RendererDiagnostics(capacity: 0)
         XCTAssertEqual(diagnostics.capacity, 1)
+    }
+
+    func testExternalTextCannotInjectAdditionalLogLines() {
+        var diagnostics = RendererDiagnostics(capacity: 2)
+        diagnostics.record("title first\nsecond", at: 1)
+
+        let report = diagnostics.incidentReport(
+            id: "R-TEST\nforged",
+            label: "Cursor\nforged source:",
+            at: 2,
+            trigger: "not-ready\nforged trigger:",
+            snapshot: "ready=false\nforged snapshot:"
+        )
+
+        XCTAssertTrue(report.contains("R-TEST forged"))
+        XCTAssertTrue(report.contains("Cursor forged source:"))
+        XCTAssertTrue(report.contains("title first second"))
+        XCTAssertFalse(report.contains("\nforged"))
     }
 }

@@ -469,27 +469,6 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         windowController.prepareForCaptureDiscontinuity("捕获流即将重建")
     }
 
-    func captureWillApplyConfiguration(id: UInt64, width: Int, height: Int,
-                                       fps: Int, sourceRect: CGRect) {
-        let crop = sourceRect.isEmpty ? "full" : String(
-            format: "%.0f,%.0f %.0fx%.0f",
-            sourceRect.minX, sourceRect.minY, sourceRect.width, sourceRect.height
-        )
-        windowController.recordRendererEvent(
-            "capture.retune.apply id=\(id) output=\(width)x\(height) fps=\(fps) crop=\(crop)"
-        )
-    }
-
-    func captureDidApplyConfiguration(id: UInt64, error: Error?) {
-        if let error {
-            windowController.recordRendererEvent(
-                "capture.retune.complete id=\(id) error=\(error.localizedDescription)"
-            )
-        } else {
-            windowController.recordRendererEvent("capture.retune.complete id=\(id) success")
-        }
-    }
-
     func captureDidOutput(_ sampleBuffer: CMSampleBuffer) {
         if state.idleDetection,
            let verdict = idleDetector.feed(sampleBuffer, activeFPS: state.fps.rawValue) {

@@ -11,7 +11,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Geo.runSelfChecks()
         #endif
         Log.info("启动 MyWindowPip \(Updater.currentVersion)，语言：\(L.isZH ? "zh" : "en")")
-        Log.info("本地诊断日志：\(Log.filePath)（仅本机，达到 2MB 自动轮转）")
 
         statusBar = StatusBarController()
         statusBar?.onShowOnboarding = { [weak self] in

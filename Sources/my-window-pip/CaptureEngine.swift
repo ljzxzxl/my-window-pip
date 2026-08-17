@@ -48,8 +48,6 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     private var retuneFlushScheduled = false
     private var lastRetuneUptime: TimeInterval = -.greatestFiniteMagnitude
     private var lastRestartUptime: TimeInterval = -.greatestFiniteMagnitude
-    private var configurationUpdateSequence: UInt64 = 0
-
     /// 帧回调队列：串行 + userInitiated，保证帧顺序且不与 UI 抢主线程
     private let frameQueue = DispatchQueue(label: CaptureEngine.queueLabel, qos: .userInitiated)
 
@@ -284,19 +282,9 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func applyConfiguration(_ configuration: SCStreamConfiguration) {
         guard let stream else { return }
-        configurationUpdateSequence &+= 1
-        let updateID = configurationUpdateSequence
-        delegate?.captureWillApplyConfiguration(
-            id: updateID,
-            width: configuration.width,
-            height: configuration.height,
-            fps: Self.fps(of: configuration),
-            sourceRect: configuration.sourceRect
-        )
         stream.updateConfiguration(configuration) { [weak self] error in
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.stream === stream else { return }
-                self.delegate?.captureDidApplyConfiguration(id: updateID, error: error)
                 guard let error else { return }
                 Log.warn("updateConfiguration 失败：\(error.localizedDescription)，改为重建流")
                 self.restart()

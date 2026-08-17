@@ -169,11 +169,6 @@ protocol CaptureEngineDelegate: AnyObject {
     func captureDidOutput(_ sampleBuffer: CMSampleBuffer)
     /// 主线程调用：引擎即将重建 SCStream；展示层应先重置旧 renderer 时间线。
     func captureWillRestart()
-    /// 主线程调用：节流合并后的配置即将真正下发给 SCStream。
-    func captureWillApplyConfiguration(id: UInt64, width: Int, height: Int,
-                                       fps: Int, sourceRect: CGRect)
-    /// 主线程调用：对应配置更新已由 ScreenCaptureKit 完成（error 为 nil 表示成功）。
-    func captureDidApplyConfiguration(id: UInt64, error: Error?)
     /// 主线程调用：流已停止（error 为 nil 表示主动停止）。
     func captureDidStop(error: Error?)
     /// 主线程调用：一段时间内未收到有效帧（源可能被最小化或遮挡）。

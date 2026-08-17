@@ -1,16 +1,16 @@
 import Foundation
 
-/// 渲染背压状态机。
+/// Renderer readiness 卡流状态机。
 ///
 /// `AVSampleBufferVideoRenderer.isReadyForMoreMediaData == false` 本身并不是错误：短暂的
-/// false 只是内部队列正在消化已有帧。真正需要处理的是「捕获帧持续到达，但 renderer
-/// 长时间不再 ready」。状态机把恢复动作逐级升级，避免一次瞬时背压就 flush，也避免
-/// renderer 永久停在旧画面：
+/// false 可能只是内部队列正在消化已有帧。真正需要处理的是「捕获帧持续到达，但
+/// renderer 长时间不再 ready」。状态机把恢复动作逐级升级，避免一次瞬时 not-ready
+/// 就 flush，也避免 renderer 永久停在旧画面：
 ///
 ///     等待 timeout → flush → 再等 timeout → 重建 layer → 再等 timeout → 重启捕获流
 ///
 /// 本类型不依赖 AVFoundation，便于用确定性的单元测试覆盖所有时间边界。
-struct RenderBackpressureMonitor {
+struct RendererStallMonitor {
 
     enum RecoveryAction: Equatable {
         case none
@@ -30,15 +30,15 @@ struct RenderBackpressureMonitor {
     let timeout: TimeInterval
 
     private var phase: Phase = .healthy
-    private var stallStartedAt: TimeInterval?
+    private(set) var stallStartedAt: TimeInterval?
 
     init(timeout: TimeInterval) {
         self.timeout = max(0.25, timeout)
     }
 
-    var isRecovering: Bool { phase != .healthy }
+    var isTrackingStall: Bool { phase != .healthy }
 
-    /// renderer 恢复接收。返回本轮背压持续时间；原本健康时返回 nil。
+    /// renderer 恢复接收。返回本轮 not-ready 持续时间；原本健康时返回 nil。
     mutating func observeReady(at now: TimeInterval) -> TimeInterval? {
         guard let started = stallStartedAt else {
             phase = .healthy

@@ -404,18 +404,10 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         contentView.onRendererRecoveryExhausted = { [weak self] in
             self?.delegate?.pipRendererRecoveryExhausted()
         }
-        contentView.onRendererIncident = { [weak self] id in
-            self?.showHint(
-                L.t("检测到画面卡住，正在自动恢复（\(id) 已记录）",
-                    "Picture stalled; recovering automatically (\(id) logged)"),
-                near: nil,
-                duration: 5.0
-            )
-        }
         contentView.onRendererIncidentRecovered = { [weak self] id in
             self?.showHint(
-                L.t("画面已恢复（诊断编号 \(id)）",
-                    "Picture recovered (diagnostic ID \(id))"),
+                L.t("画面已自动恢复（日志编号 \(id)）",
+                    "Picture recovered automatically (log ID \(id))"),
                 near: nil,
                 duration: 4.0
             )

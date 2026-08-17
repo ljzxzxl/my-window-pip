@@ -45,65 +45,52 @@ enum SelfTest {
             return 3
         }
         print("可捕获窗口：\(windows.count) 个")
-        // 优先尝试当前在屏幕上的普通层窗口，再尝试其它普通层，最后才是系统层。
-        // 单凭 isOnScreen 仍无法排除某些不产帧的透明/过渡窗口，因此按顺序尝试少量候选，
-        // 避免一次偶然选错目标就把健康的捕获链路误报为失败。
+        // 优先挑普通层（windowLayer == 0）的最大窗口，避免选到 Dock 这类系统层窗口
         let normalLayer = windows.filter { $0.windowLayer == 0 }
-        let byArea: (SCWindow, SCWindow) -> Bool = {
-            $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height
-        }
-        let candidates = (
-            normalLayer.filter(\.isOnScreen).sorted(by: byArea)
-            + normalLayer.filter { !$0.isOnScreen }.sorted(by: byArea)
-            + windows.filter { $0.windowLayer != 0 }.sorted(by: byArea)
-        ).prefix(4)
-        guard !candidates.isEmpty else {
+        let pool = normalLayer.isEmpty ? windows : normalLayer
+        guard let target = pool.max(by: {
+            $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+        }) else {
             print("→ 没有可捕获的窗口，跳过捕获验证")
             return 0
         }
+        let title = ShareableContentStore.shared.displayTitle(for: target)
+        print("测试目标：\(title) [\(Int(target.frame.width))×\(Int(target.frame.height))]")
 
-        var didStartCapture = false
-        for (index, target) in candidates.enumerated() {
-            let title = ShareableContentStore.shared.displayTitle(for: target)
-            print("测试目标 \(index + 1)/\(candidates.count)：\(title) [\(Int(target.frame.width))×\(Int(target.frame.height))]")
-
-            let engine = CaptureEngine()
-            let probe = FrameProbe()
-            engine.delegate = probe
-            let config = CaptureEngine.makeConfiguration(
-                sourceRect: CGRect(origin: .zero, size: target.frame.size),
-                pointSize: target.frame.size,
-                scale: 1,
-                fps: 15,
-                showsCursor: false
-            )
-            do {
-                try engine.start(filter: CaptureEngine.filter(for: target), configuration: config)
-                didStartCapture = true
-            } catch {
-                print("→ 建流失败：\(error.localizedDescription)，尝试下一个窗口")
-                continue
-            }
-
-            // 用 runloop 等待，保证主线程回调能被派发。
-            let deadline = Date().addingTimeInterval(2.0)
-            while Date() < deadline, probe.frameCount < 10 {
-                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
-            }
-            engine.stop()
-
-            print("收到有效帧：\(probe.frameCount) 帧（2 秒 / 15fps）")
-            if let size = probe.lastPixelSize {
-                print("帧尺寸：\(Int(size.width))×\(Int(size.height))")
-            }
-            if probe.frameCount > 0 {
-                print("自检通过")
-                return 0
-            }
-            print("→ 当前窗口未产出有效帧，尝试下一个窗口")
+        // 建流并收帧
+        let engine = CaptureEngine()
+        let probe = FrameProbe()
+        engine.delegate = probe
+        let config = CaptureEngine.makeConfiguration(
+            sourceRect: CGRect(origin: .zero, size: target.frame.size),
+            pointSize: target.frame.size,
+            scale: 1,
+            fps: 15,
+            showsCursor: false
+        )
+        do {
+            try engine.start(filter: CaptureEngine.filter(for: target), configuration: config)
+        } catch {
+            print("→ 建流失败：\(error.localizedDescription)")
+            return 4
         }
-        print(didStartCapture ? "→ 所有候选窗口均未产出有效帧，捕获链路异常" : "→ 所有候选窗口均建流失败")
-        return didStartCapture ? 5 : 4
+        // 用 runloop 等待，保证主线程回调能被派发
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline, probe.frameCount < 10 {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        engine.stop()
+
+        print("收到有效帧：\(probe.frameCount) 帧（2 秒 / 15fps）")
+        if let size = probe.lastPixelSize {
+            print("帧尺寸：\(Int(size.width))×\(Int(size.height))")
+        }
+        if probe.frameCount == 0 {
+            print("→ 未收到任何帧，捕获链路异常")
+            return 5
+        }
+        print("自检通过")
+        return 0
     }
 
     private static func machineArch() -> String {
@@ -127,9 +114,6 @@ private final class FrameProbe: CaptureEngineDelegate {
     var lastPixelSize: CGSize? { lock.lock(); defer { lock.unlock() }; return size }
 
     func captureWillRestart() {}
-    func captureWillApplyConfiguration(id: UInt64, width: Int, height: Int,
-                                       fps: Int, sourceRect: CGRect) {}
-    func captureDidApplyConfiguration(id: UInt64, error: Error?) {}
 
     func captureDidOutput(_ sampleBuffer: CMSampleBuffer) {
         lock.lock()

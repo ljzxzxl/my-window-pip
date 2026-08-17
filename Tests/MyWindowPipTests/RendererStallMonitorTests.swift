@@ -1,19 +1,21 @@
 import XCTest
 @testable import my_window_pip
 
-final class RenderBackpressureMonitorTests: XCTestCase {
+final class RendererStallMonitorTests: XCTestCase {
 
-    func testTransientBackpressureDoesNotTriggerRecovery() {
-        var monitor = RenderBackpressureMonitor(timeout: 2)
+    func testTransientNotReadyDoesNotTriggerRecovery() {
+        var monitor = RendererStallMonitor(timeout: 2)
 
         XCTAssertEqual(monitor.observeNotReady(at: 10), .none)
+        XCTAssertEqual(monitor.stallStartedAt, 10)
         XCTAssertEqual(monitor.observeNotReady(at: 11.99), .none)
         XCTAssertEqual(monitor.observeReady(at: 12) ?? -1, 2, accuracy: 0.001)
-        XCTAssertFalse(monitor.isRecovering)
+        XCTAssertFalse(monitor.isTrackingStall)
+        XCTAssertNil(monitor.stallStartedAt)
     }
 
-    func testPersistentBackpressureEscalatesInOrder() {
-        var monitor = RenderBackpressureMonitor(timeout: 2)
+    func testPersistentNotReadyEscalatesInOrder() {
+        var monitor = RendererStallMonitor(timeout: 2)
 
         XCTAssertEqual(monitor.observeNotReady(at: 0), .none)
         XCTAssertEqual(monitor.observeNotReady(at: 1.99), .none)
@@ -26,7 +28,7 @@ final class RenderBackpressureMonitorTests: XCTestCase {
     }
 
     func testSuccessfulFrameResetsEscalation() {
-        var monitor = RenderBackpressureMonitor(timeout: 2)
+        var monitor = RendererStallMonitor(timeout: 2)
 
         XCTAssertEqual(monitor.observeNotReady(at: 0), .none)
         XCTAssertEqual(monitor.observeNotReady(at: 2), .flush)
@@ -37,7 +39,7 @@ final class RenderBackpressureMonitorTests: XCTestCase {
     }
 
     func testKnownDiscontinuityFlushesImmediately() {
-        var monitor = RenderBackpressureMonitor(timeout: 2)
+        var monitor = RendererStallMonitor(timeout: 2)
 
         XCTAssertEqual(monitor.requestImmediateFlush(at: 5), .flush)
         XCTAssertEqual(monitor.requestImmediateFlush(at: 5.1), .none)
@@ -46,7 +48,7 @@ final class RenderBackpressureMonitorTests: XCTestCase {
     }
 
     func testTimeoutHasSafeLowerBound() {
-        let monitor = RenderBackpressureMonitor(timeout: 0)
+        let monitor = RendererStallMonitor(timeout: 0)
         XCTAssertEqual(monitor.timeout, 0.25)
     }
 }

@@ -26,8 +26,7 @@ final class PiPContentView: NSView {
     var onRequestTogglePause: (() -> Void)?
     /// renderer 经 flush + 重建 layer 后仍不恢复，交给会话层重启捕获流。
     var onRendererRecoveryExhausted: (() -> Void)?
-    /// 确认发生 renderer 卡流 / 卡流恢复；controller 用它显示非阻塞提示。
-    var onRendererIncident: ((String) -> Void)?
+    /// renderer 卡流恢复后，controller 用它显示一次非阻塞提示。
     var onRendererIncidentRecovered: ((String) -> Void)?
     /// 手动拖动窗口结束（本次按下确实移动过窗口）：上层据此持久化位置、处理跨屏 scale 变化
     var onDidDragWindow: (() -> Void)?
@@ -44,9 +43,9 @@ final class PiPContentView: NSView {
     /// 日志标签（源窗口标题），由 controller 注入。
     private var diagnosticLabel = "-"
 
-    /// renderer 短暂背压很常见；连续 2 秒不接收才视为卡住。
+    /// renderer 短暂 not-ready 很常见；连续 2 秒不接收才视为卡住。
     private static let rendererStallTimeout: TimeInterval = 2.0
-    private var renderHealth = RenderBackpressureMonitor(timeout: rendererStallTimeout)
+    private var stallMonitor = RendererStallMonitor(timeout: rendererStallTimeout)
     private var flushToken = 0
     private var flushInFlightSince: TimeInterval?
     private var lastIncomingPTS: CMTime?
@@ -59,7 +58,10 @@ final class PiPContentView: NSView {
     private var rendererRecoveryCount: UInt64 = 0
     private var diagnostics = RendererDiagnostics()
     private var currentIncidentID: String?
-    private var currentIncidentStartedAt: TimeInterval?
+    /// 第一次观测到 not-ready 的时间；跨 layer/捕获流重建也保持不变。
+    private var currentIncidentStallStartedAt: TimeInterval?
+    /// 从确认达到卡流阈值到恢复的时间；与从首次 not-ready 开始计算的卡流总时长分开。
+    private var currentIncidentDetectedAt: TimeInterval?
     private var lastRendererStateSignature: String?
 
     // MARK: - 手势换算所需的状态（由 controller 注入）
@@ -173,7 +175,8 @@ final class PiPContentView: NSView {
     }
 
     func setDiagnosticLabel(_ label: String) {
-        diagnosticLabel = label.isEmpty ? "-" : label
+        let flattened = label.components(separatedBy: .newlines).joined(separator: " ")
+        diagnosticLabel = flattened.isEmpty ? "-" : String(flattened.prefix(512))
         recordDiagnosticEvent("session.label \(diagnosticLabel)")
     }
 
@@ -198,23 +201,23 @@ final class PiPContentView: NSView {
         // 新时间线混用，否则 AVFoundation 可能一直保留旧帧并把队列顶满。
         if let reason = incomingDiscontinuity(in: sampleBuffer) {
             diagnostics.record("frame.discontinuity \(reason)", at: now)
-            var action = renderHealth.requestImmediateFlush(at: now)
+            var action = stallMonitor.requestImmediateFlush(at: now)
             // 恢复已经开始时不能反复从头计时，否则异常格式来回变化会阻止分级升级。
-            if action == .none { action = renderHealth.observeNotReady(at: now) }
+            if action == .none { action = stallMonitor.observeNotReady(at: now) }
             perform(action, at: now, reason: reason, planned: true)
             notReadyDropCount &+= 1
             return
         }
 
-        // failed / requiresFlush 是明确错误，不等待背压超时，立即 flush。
+        // failed / requiresFlush 是明确错误，不等待卡流超时，立即 flush。
         if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
             if !didLogRenderFailure {
                 didLogRenderFailure = true
                 diagnostics.record("renderer.failure \(rendererState(renderer))", at: now)
                 Log.warn("renderer 需要恢复 [\(diagnosticLabel)]：\(renderer.error?.localizedDescription ?? "-")")
             }
-            var action = renderHealth.requestImmediateFlush(at: now)
-            if action == .none { action = renderHealth.observeNotReady(at: now) }
+            var action = stallMonitor.requestImmediateFlush(at: now)
+            if action == .none { action = stallMonitor.observeNotReady(at: now) }
             perform(action, at: now, reason: "renderer failed")
             notReadyDropCount &+= 1
             return
@@ -225,31 +228,31 @@ final class PiPContentView: NSView {
         // 在下一个 timeout 自动升级为重建 layer。
         if flushInFlightSince != nil {
             notReadyDropCount &+= 1
-            let action = renderHealth.observeNotReady(at: now)
+            let action = stallMonitor.observeNotReady(at: now)
             perform(action, at: now, reason: "flush 未完成")
             return
         }
 
         guard renderer.isReadyForMoreMediaData else {
-            let wasRecovering = renderHealth.isRecovering
+            let wasTrackingStall = stallMonitor.isTrackingStall
             notReadyDropCount &+= 1
-            let action = renderHealth.observeNotReady(at: now)
-            if !wasRecovering {
+            let action = stallMonitor.observeNotReady(at: now)
+            if !wasTrackingStall {
                 diagnostics.record("renderer.not-ready.begin \(rendererState(renderer))", at: now)
-                Log.debug("renderer 开始背压 [\(diagnosticLabel)]")
+                Log.debug("renderer 开始 not-ready [\(diagnosticLabel)]")
             }
             perform(action, at: now, reason: "持续 not-ready")
             return
         }
 
-        if let duration = renderHealth.observeReady(at: now) {
-            let message = "renderer 已恢复 [\(diagnosticLabel)]：背压 \(String(format: "%.1f", duration))s，累计丢帧 \(notReadyDropCount)"
-            if duration >= Self.rendererStallTimeout {
+        if let stallDuration = stallMonitor.observeReady(at: now) {
+            let message = "renderer 已恢复 [\(diagnosticLabel)]：not-ready \(String(format: "%.1f", stallDuration))s，累计丢帧 \(notReadyDropCount)"
+            if stallDuration >= Self.rendererStallTimeout {
                 Log.info(message)
             } else {
                 Log.debug(message)
             }
-            finishIncidentIfNeeded(at: now, duration: duration)
+            finishIncidentIfNeeded(at: now, stallDuration: stallDuration)
         }
         renderer.enqueue(sampleBuffer)
         enqueuedFrameCount &+= 1
@@ -262,8 +265,8 @@ final class PiPContentView: NSView {
         diagnostics.record("capture.discontinuity \(reason)", at: now)
         lastIncomingPTS = nil
         lastPixelSize = nil
-        renderHealth.reset()
-        let action = renderHealth.requestImmediateFlush(at: now)
+        stallMonitor.reset()
+        let action = stallMonitor.requestImmediateFlush(at: now)
         perform(action, at: now, reason: reason, planned: true)
     }
 
@@ -274,14 +277,17 @@ final class PiPContentView: NSView {
         if let id = currentIncidentID {
             Log.warn("renderer incident \(id) 未等到 ready，因会话 reset 结束 [\(diagnosticLabel)]")
             currentIncidentID = nil
-            currentIncidentStartedAt = nil
+            currentIncidentStallStartedAt = nil
+            currentIncidentDetectedAt = nil
         }
         flushToken &+= 1
         flushInFlightSince = nil
+        // SCK 输出的是未压缩 BGRA pixel buffer，每帧都可独立显示，满足 flush 后下一帧
+        // 必须是 sync frame 的约定；不需要等待视频编码语义上的 IDR。
         displayLayer.sampleBufferRenderer.flush(
             removingDisplayedImage: true, completionHandler: nil
         )
-        renderHealth.reset()
+        stallMonitor.reset()
         lastIncomingPTS = nil
         lastPixelSize = nil
         lastRendererStateSignature = nil
@@ -316,7 +322,7 @@ final class PiPContentView: NSView {
         return reason
     }
 
-    private func perform(_ action: RenderBackpressureMonitor.RecoveryAction,
+    private func perform(_ action: RendererStallMonitor.RecoveryAction,
                          at now: TimeInterval, reason: String, planned: Bool = false) {
         guard action != .none else { return }
         let isPlannedFlush = planned && action == .flush
@@ -395,7 +401,8 @@ final class PiPContentView: NSView {
         guard currentIncidentID == nil else { return }
         let id = "R-\(UUID().uuidString.prefix(8).uppercased())"
         currentIncidentID = id
-        currentIncidentStartedAt = now
+        currentIncidentStallStartedAt = stallMonitor.stallStartedAt ?? now
+        currentIncidentDetectedAt = now
         diagnostics.record("incident.begin id=\(id) trigger=\(trigger)", at: now)
         let report = diagnostics.incidentReport(
             id: id,
@@ -405,22 +412,31 @@ final class PiPContentView: NSView {
             snapshot: rendererSnapshot(at: now)
         )
         Log.warn("\(report)\n  log file: \(Log.filePath)")
-        onRendererIncident?(id)
     }
 
-    private func finishIncidentIfNeeded(at now: TimeInterval, duration: TimeInterval) {
+    private func finishIncidentIfNeeded(at now: TimeInterval, stallDuration lastPhaseDuration: TimeInterval) {
         guard let id = currentIncidentID else { return }
-        let totalDuration = currentIncidentStartedAt.map { max(0, now - $0) } ?? duration
+        let timing = RendererIncidentTiming(
+            stallStartedAt: currentIncidentStallStartedAt,
+            detectedAt: currentIncidentDetectedAt,
+            recoveredAt: now,
+            lastPhaseDuration: lastPhaseDuration
+        )
         diagnostics.record(
             String(
-                format: "incident.recovered id=%@ totalDuration=%.3fs lastPhaseDuration=%.3fs",
-                id, totalDuration, duration
+                format: "incident.recovered id=%@ stallDuration=%.3fs recoveryDuration=%.3fs",
+                id, timing.stallDuration, timing.recoveryDuration
             ),
             at: now
         )
-        Log.info("renderer incident \(id) 已恢复 [\(diagnosticLabel)]：总耗时 \(String(format: "%.3f", totalDuration))s；日志 \(Log.filePath)")
+        Log.info(
+            "renderer incident \(id) 已恢复 [\(diagnosticLabel)]：卡流总时长 "
+                + "\(String(format: "%.3f", timing.stallDuration))s；自动恢复耗时 "
+                + "\(String(format: "%.3f", timing.recoveryDuration))s；日志 \(Log.filePath)"
+        )
         currentIncidentID = nil
-        currentIncidentStartedAt = nil
+        currentIncidentStallStartedAt = nil
+        currentIncidentDetectedAt = nil
         onRendererIncidentRecovered?(id)
     }
 

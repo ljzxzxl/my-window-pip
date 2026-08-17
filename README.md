@@ -168,7 +168,7 @@ Pull requests and pushes to `main` run the warning-free build and unit tests on 
 | Path | Purpose |
 |---|---|
 | `Sources/my-window-pip/` | All Swift sources: capture layer (`CaptureEngine`, `ShareableContentStore`, `FrameGate`, `IdleDetector`), presentation layer (`PiPWindowController`, `PiPContentView`, overlay views), session layer (`PiPSession`, `SessionStore`), input layer (hotkeys, event tap, hover monitor, region selection) and foundation (`Models`, `Geo`, `Preferences`, `Permissions`, `Updater`) |
-| `Tests/MyWindowPipTests/` | Deterministic unit tests for renderer backpressure and recovery escalation |
+| `Tests/MyWindowPipTests/` | Deterministic unit tests for renderer stalls and recovery escalation |
 | `Resources/` | `Info.plist` and the 1024×1024 icon source |
 | `scripts/build-app.sh` | Builds both architectures with `swiftc`, assembles the `.app`, generates `AppIcon.icns`, signs with the fixed identity |
 | `scripts/reset-permission.sh` | Resets this app's Screen Recording / Accessibility TCC records |
@@ -302,7 +302,7 @@ bash scripts/build-app.sh --fast       # 只编当前架构，开发期更快
 bash scripts/build-app.sh --debug      # 带 DEBUG 日志与几何自检
 bash scripts/build-app.sh --install    # 顺带安装到 /Applications
 bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + SHA256
-swift test                             # renderer 背压与自愈状态机单元测试
+swift test                             # renderer 卡流与自愈状态机单元测试
 ```
 
 内置自检（不开界面，改完代码跑一遍最省事）：
@@ -326,7 +326,7 @@ PR 与推送到 `main` 会在 macOS 14 上执行零警告编译和单元测试�
 | 路径 | 用途 |
 |---|---|
 | `Sources/my-window-pip/` | 全部 Swift 源码：捕获层（`CaptureEngine`、`ShareableContentStore`、`FrameGate`、`IdleDetector`）、展示层（`PiPWindowController`、`PiPContentView`、控制条与占位视图）、会话层（`PiPSession`、`SessionStore`）、输入层（热键、事件监听、悬停轮询、区域框选）、基础层（`Models`、`Geo`、`Preferences`、`Permissions`、`Updater`） |
-| `Tests/MyWindowPipTests/` | renderer 背压检测与分级自愈的确定性单元测试 |
+| `Tests/MyWindowPipTests/` | renderer 卡流检测与分级自愈的确定性单元测试 |
 | `Resources/` | `Info.plist` 与 1024×1024 图标源文件 |
 | `scripts/build-app.sh` | 用 `swiftc` 编双架构、组装 `.app`、生成 `AppIcon.icns`、用固定身份签名 |
 | `scripts/reset-permission.sh` | 重置本应用的屏幕录制 / 辅助功能 TCC 记录 |
