@@ -64,8 +64,8 @@ private final class PiPRootView: NSView {
 
 /// 提示条内容视图（自绘背景 + 文字），由 `PiPWindowController` 放进一个跟随浮窗的子窗口里。
 ///
-/// 为什么不用系统 tooltip：浮窗 level 为 `.screenSaver`(1000)，而系统 tooltip 是层级更低的独立窗口，
-/// 会被压在浮窗后面只露出窗外的一小截；它的初始延迟也由 `NSToolTipManager` 私有控制，无法调整。
+/// 为什么不用系统 tooltip：强制最顶层模式使用 `.screenSaver`，系统 tooltip 会被压在浮窗后面；
+/// 此外它的初始延迟由 `NSToolTipManager` 私有控制，无法满足控制条的即时反馈。
 ///
 /// 为什么不用 `NSTextField`：`NSTextField` 的 cell 自身还有约 2pt 的左右内边距，
 /// 按 `NSString.size(withAttributes:)` 算出的宽度总会比 cell 实际需要的少 4pt 左右，
@@ -510,7 +510,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
 
     // MARK: - 提示条（跟随浮窗的子窗口）
 
-    /// 在浮窗外显示提示条（不用系统 tooltip，避免被浮窗层级遮挡）。
+    /// 在浮窗外显示提示条（不用系统 tooltip，兼容强制最顶层模式并提供即时反馈）。
     ///
     /// - Parameters:
     ///   - text: nil / 空串表示立即隐藏提示
@@ -899,7 +899,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         clickActivateItem.action = #selector(menuToggleClickToActivate)
         contextMenu.addItem(clickActivateItem)
 
-        let levelItem = NSMenuItem(title: L.t("置顶层级", "Window Level"), action: nil, keyEquivalent: "")
+        let levelItem = NSMenuItem(title: L.t("悬浮方式", "PiP Behavior"), action: nil, keyEquivalent: "")
         let levelMenu = NSMenu()
         levelMenu.autoenablesItems = false
         for mode in WindowLevelMode.allCases {

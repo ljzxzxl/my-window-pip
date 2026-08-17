@@ -32,7 +32,8 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **不跨帧持有 `CMSampleBuffer`**，`queueDepth = 3`，宁丢帧不积压。
 - **防镜中镜**：浮窗 `sharingType = .none`；窗口枚举过滤自身 App；区域捕获的显示器过滤器按 App 排除自己。
 - **零权限优先**：任何功能都必须能在「只有屏幕录制权限」的前提下通过控制条或右键菜单完成；辅助功能权限只允许作为增强项。
-- **不用系统 tooltip**：浮窗 level 是 `.screenSaver`(1000)，系统 tooltip 窗口层级更低会被压在浮窗后面，而且初始延迟不可调。所有浮窗内的提示统一走 `PiPWindowController.showHint(_:near:duration:)`，它用一个 `addChildWindow` 挂在浮窗上的**子窗口**承载（这样才能画到浮窗顶边之外、显示在图标上方），子窗口必须 `ignoresMouseEvents = true`。新增按钮时把提示文案登记到 `OverlayControlsView` 的 hint 映射里，不要再写 `toolTip`。
+- **窗口层级与 Space 行为分离**：默认「全局悬浮」使用 `.floating`，通过 `.canJoinAllSpaces` + `.fullScreenAuxiliary` 实现所有 Space / 全屏可见，让系统菜单、提示与模态窗口保持在 PiP 上方；`.screenSaver` 只用于用户显式选择的「强制最顶层」兼容模式。
+- **不用系统 tooltip**：强制最顶层模式会压住系统 tooltip，而且系统 tooltip 的初始延迟不可调。所有浮窗内的提示统一走 `PiPWindowController.showHint(_:near:duration:)`，它用一个 `addChildWindow` 挂在浮窗上的**子窗口**承载（这样才能画到浮窗顶边之外、显示在图标上方），子窗口必须 `ignoresMouseEvents = true`。新增按钮时把提示文案登记到 `OverlayControlsView` 的 hint 映射里，不要再写 `toolTip`。
 - **拖动是手动实现的**：`isMovableByWindowBackground = false`，由 `PiPContentView` 在 `mouseDragged` 里按位移 `setFrameOrigin`。原因是系统背景拖动会吞掉 `mouseUp`，拿不到干净的单击，而单击要用来「切回源应用」。改动手势时注意保持「拖动后触发 `pipDidMove` 持久化」与「跨屏 scale 变化后 retune」两条链路。
 - **自动隐藏必须留逃生通道**：淡出后浮窗 `ignoresMouseEvents = true`，收不到任何鼠标事件。通道有四条：鼠标停在顶栏热区（`HoverMonitor` 的 `hotZoneProvider` + `PiPWindowController.barScreenFrame`）、按住 ⌥ 临时唤回、菜单栏每会话子菜单、开启时的 3 秒提示。改动自动隐藏逻辑时这几条不能破。
 - **双语**：用户可见字符串一律 `L.t("中文", "English")`，不引入 `.lproj`。

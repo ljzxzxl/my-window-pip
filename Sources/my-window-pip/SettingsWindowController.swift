@@ -5,7 +5,7 @@ import AppKit
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
 
-    /// 浮窗层级变化后需要应用到已打开的浮窗
+    /// 浮窗展示方式变化后需要应用到已打开的浮窗
     var onLevelModeChanged: ((WindowLevelMode) -> Void)?
     /// 自动隐藏透明度变化后需要应用到已打开的浮窗
     var onAutoHideOpacityChanged: ((CGFloat) -> Void)?
@@ -80,7 +80,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         levelPopup.selectItem(at: WindowLevelMode.allCases.firstIndex(of: prefs.windowLevelMode) ?? 0)
         levelPopup.target = self
         levelPopup.action = #selector(levelModeChanged(_:))
-        stack.addArrangedSubview(row(L.t("浮窗层级", "Window level"), levelPopup))
+        stack.addArrangedSubview(row(L.t("悬浮方式", "PiP behavior"), levelPopup))
 
         stack.addArrangedSubview(checkbox(
             L.t("新建浮窗默认开启自动隐藏（鼠标移上去淡出并可点透）",

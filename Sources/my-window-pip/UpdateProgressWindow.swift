@@ -25,7 +25,7 @@ private enum UpdateProgressMetrics {
 ///
 /// 几个刻意的设计选择：
 /// - `NSPanel` + `.nonactivatingPanel`：不抢当前 App 的焦点（本应用是 `LSUIElement`，没有主窗口）
-/// - `level = .floating`：**必须低于 PiP 浮窗的 `.screenSaver`**，否则会盖住画中画
+/// - `level = .normal`：低于所有 PiP 模式，下载反馈可见但不会反过来盖住画中画
 /// - 单例复用：重复 `show` 只把已有面板前置，不重建窗口；`dismiss` 只 `orderOut`，实例留着下次用
 /// - 所有对外方法内部都会兜一层主线程派发，调用方可以直接从 URLSession 的 delegate 队列调用
 final class UpdateProgressWindow: NSObject, NSWindowDelegate {
@@ -206,9 +206,9 @@ final class UpdateProgressWindow: NSObject, NSWindowDelegate {
 
     private func configurePanel() {
         panel.title = L.t("软件更新", "Software Update")
-        // 低于 PiP 浮窗的 .screenSaver，绝不盖住画中画
-        panel.level = .floating
         panel.isFloatingPanel = true
+        // isFloatingPanel 之后显式设回 normal：保留非激活面板行为，但始终低于 PiP 的 floating 层级
+        panel.level = .normal
         panel.becomesKeyOnlyIfNeeded = true      // 不抢焦点，点按钮也不需要成为 key window
         panel.hidesOnDeactivate = false          // 切到别的 App 时进度依然可见
         panel.isReleasedWhenClosed = false       // 单例复用，关闭不销毁

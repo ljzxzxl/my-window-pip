@@ -8,8 +8,8 @@ import AppKit
 /// - 显示/隐藏统一走 `setVisible(_:animated:)`；淡出结束后置 `isHidden = true`，彻底不拦截鼠标。
 /// - 本视图只发信号（闭包回调），不持有会话、不改状态；状态一律由 `update(state:)` 单向灌入。
 ///
-/// 提示语约定（v0.1.2）：**不再使用系统 tooltip**。浮窗 level 是 `.screenSaver`(1000)，
-/// 系统 tooltip 是独立窗口且层级更低，会被压在浮窗后面只露出一小部分，初始延迟也无公开 API 可调。
+/// 提示语约定（v0.1.2）：**不再使用系统 tooltip**。强制最顶层模式使用 `.screenSaver`，
+/// 系统 tooltip 会被压在浮窗后面；它的初始延迟也无公开 API 可调。
 /// 因此这里只负责「鼠标进入了哪个控件、该显示什么文案」，连同该控件的**屏幕坐标 frame** 经
 /// `onHintChange` 零延迟上抛，由 `PiPWindowController` 用跟随浮窗的子窗口画在图标上方。
 /// 无障碍标签（`setAccessibilityLabel`）全部保留。

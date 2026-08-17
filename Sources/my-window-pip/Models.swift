@@ -67,31 +67,44 @@ enum FPSStep: Int, CaseIterable {
     }
 }
 
-/// 浮窗层级偏好。
+/// 浮窗在窗口层级、Spaces 与全屏环境中的展示方式。
+///
+/// 窗口层级与 Space 行为是两组独立能力：常规的全局悬浮只需要 `.floating`
+/// 配合 collection behavior；`.screenSaver` 仅留给明确选择「强制最顶层」的用户，
+/// 避免默认压住菜单栏下拉菜单、系统提示和模态面板。
 enum WindowLevelMode: String, CaseIterable {
-    /// 全局悬浮：所有 Space 可见，尽量盖在全屏应用之上。
+    /// 推荐模式：所有 Space / 全屏空间可见，但系统菜单仍能正常显示在浮窗之上。
     case global
-    /// 普通置顶：仅当前 Space，不侵入全屏应用。
+    /// 仅跟随当前 Space，仍置于该 Space 的普通窗口之上。
     case normal
+    /// 兼容少数会压住普通浮动面板的全屏应用；代价是可能遮挡系统级菜单。
+    case topmost
 
     var windowLevel: NSWindow.Level {
         switch self {
-        case .global: return .screenSaver
-        case .normal: return .floating
+        case .global, .normal: return .floating
+        case .topmost: return .screenSaver
         }
     }
 
     var collectionBehavior: NSWindow.CollectionBehavior {
         switch self {
-        case .global: return [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        case .global, .topmost:
+            return [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         case .normal: return [.managed, .fullScreenAuxiliary]
         }
     }
 
     var label: String {
         switch self {
-        case .global: return L.t("全局悬浮（所有 Space / 全屏应用之上）", "Global (all Spaces, above full-screen)")
-        case .normal: return L.t("普通置顶（仅当前 Space）", "Normal (current Space only)")
+        case .global:
+            return L.t("全局悬浮（推荐，系统菜单优先）",
+                       "Global (recommended, below system menus)")
+        case .normal:
+            return L.t("当前 Space 置顶", "Current Space only")
+        case .topmost:
+            return L.t("强制最顶层（可能遮挡系统菜单）",
+                       "Force topmost (may cover system menus)")
         }
     }
 }
