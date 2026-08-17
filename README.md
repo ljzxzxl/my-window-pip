@@ -92,7 +92,10 @@ The system prompt appears on first launch and the app registers itself under *Sy
 
 Release builds from v0.1.4 on are signed with a stable identity, so the grant **survives app updates**. If you are upgrading from v0.1.3 or earlier, macOS may ask once more because the old build left a stale record: click **Reset permission record** in the guide dialog, relaunch, and allow — later updates will keep it. Also drag the app into `/Applications` before running it; launching from the DMG or Downloads folder makes macOS randomise the path, which confuses the grant.
 
-Frames stay in local memory and VRAM: nothing is written to disk, uploaded, or reported. The app makes no network requests other than update checks.
+Frames stay in local memory and VRAM: no pixels are written to disk, uploaded, or reported. Local operational
+metadata (window title, capture configuration and renderer state — never frame contents) is written to
+`~/Library/Logs/MyWindowPip/MyWindowPip.log` for troubleshooting. It rotates at 2 MB, keeps one previous file,
+and is never uploaded. The app makes no network requests other than update checks.
 
 ### Download
 
@@ -247,7 +250,10 @@ Pull requests and pushes to `main` run the warning-free build and unit tests on 
 
 v0.1.4 起发布包使用固定签名身份，**授权可以跨版本存活**，更新后不再重新索要。从 v0.1.3 及更早版本升级上来时，因为旧包留下的是失效记录，还会被要求授权一次：在引导框里点**「重置授权记录」**→ 重启 → 允许，之后所有更新都会保留。另外请把 App 拖进 `/Applications` 再运行——直接从 DMG 或下载目录启动会被 macOS 随机化路径，同样会干扰授权。
 
-画面只在本机内存与显存中流转：不写磁盘、不上传、不做任何遥测；除主动检查更新外不发起任何网络请求。
+画面只在本机内存与显存中流转：像素内容不写磁盘、不上传、不做任何遥测。本地仅记录用于排障的
+运行元数据（窗口标题、捕获配置、renderer 状态，不含画面内容）到
+`~/Library/Logs/MyWindowPip/MyWindowPip.log`；达到 2 MB 自动轮转并只保留一个历史文件，永不上传。
+除主动检查更新外不发起任何网络请求。
 
 ### 下载
 

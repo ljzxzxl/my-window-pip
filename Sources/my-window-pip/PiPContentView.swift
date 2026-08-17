@@ -26,6 +26,9 @@ final class PiPContentView: NSView {
     var onRequestTogglePause: (() -> Void)?
     /// renderer 经 flush + 重建 layer 后仍不恢复，交给会话层重启捕获流。
     var onRendererRecoveryExhausted: (() -> Void)?
+    /// 确认发生 renderer 卡流 / 卡流恢复；controller 用它显示非阻塞提示。
+    var onRendererIncident: ((String) -> Void)?
+    var onRendererIncidentRecovered: ((String) -> Void)?
     /// 手动拖动窗口结束（本次按下确实移动过窗口）：上层据此持久化位置、处理跨屏 scale 变化
     var onDidDragWindow: (() -> Void)?
     /// 干净的单击（未拖动、`clickCount == 1`、无 Cmd/⌥/⌃/⇧）：请求切回源应用
@@ -48,9 +51,16 @@ final class PiPContentView: NSView {
     private var flushInFlightSince: TimeInterval?
     private var lastIncomingPTS: CMTime?
     private var lastPixelSize: CGSize?
+    private var lastIncomingUptime: TimeInterval?
+    private var lastEnqueuedUptime: TimeInterval?
+    private var incomingFrameCount: UInt64 = 0
     private var enqueuedFrameCount: UInt64 = 0
     private var notReadyDropCount: UInt64 = 0
     private var rendererRecoveryCount: UInt64 = 0
+    private var diagnostics = RendererDiagnostics()
+    private var currentIncidentID: String?
+    private var currentIncidentStartedAt: TimeInterval?
+    private var lastRendererStateSignature: String?
 
     // MARK: - 手势换算所需的状态（由 controller 注入）
 
@@ -164,6 +174,12 @@ final class PiPContentView: NSView {
 
     func setDiagnosticLabel(_ label: String) {
         diagnosticLabel = label.isEmpty ? "-" : label
+        recordDiagnosticEvent("session.label \(diagnosticLabel)")
+    }
+
+    /// 捕获 / 会话层把低频生命周期事件写进同一个环形缓冲，供卡流快照关联。
+    func recordDiagnosticEvent(_ event: String) {
+        diagnostics.record(event, at: ProcessInfo.processInfo.systemUptime)
     }
 
     // MARK: - 帧入队
@@ -173,10 +189,15 @@ final class PiPContentView: NSView {
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
 
         let now = ProcessInfo.processInfo.systemUptime
+        incomingFrameCount &+= 1
+        lastIncomingUptime = now
+        let renderer = displayLayer.sampleBufferRenderer
+        recordRendererTransition(renderer, at: now)
 
         // 新 SCStream / 输出分辨率变化可能带来格式或 PTS 时间线不连续。旧队列不能和
         // 新时间线混用，否则 AVFoundation 可能一直保留旧帧并把队列顶满。
         if let reason = incomingDiscontinuity(in: sampleBuffer) {
+            diagnostics.record("frame.discontinuity \(reason)", at: now)
             var action = renderHealth.requestImmediateFlush(at: now)
             // 恢复已经开始时不能反复从头计时，否则异常格式来回变化会阻止分级升级。
             if action == .none { action = renderHealth.observeNotReady(at: now) }
@@ -185,12 +206,11 @@ final class PiPContentView: NSView {
             return
         }
 
-        let renderer = displayLayer.sampleBufferRenderer
-
         // failed / requiresFlush 是明确错误，不等待背压超时，立即 flush。
         if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
             if !didLogRenderFailure {
                 didLogRenderFailure = true
+                diagnostics.record("renderer.failure \(rendererState(renderer))", at: now)
                 Log.warn("renderer 需要恢复 [\(diagnosticLabel)]：\(renderer.error?.localizedDescription ?? "-")")
             }
             var action = renderHealth.requestImmediateFlush(at: now)
@@ -215,6 +235,7 @@ final class PiPContentView: NSView {
             notReadyDropCount &+= 1
             let action = renderHealth.observeNotReady(at: now)
             if !wasRecovering {
+                diagnostics.record("renderer.not-ready.begin \(rendererState(renderer))", at: now)
                 Log.debug("renderer 开始背压 [\(diagnosticLabel)]")
             }
             perform(action, at: now, reason: "持续 not-ready")
@@ -228,14 +249,17 @@ final class PiPContentView: NSView {
             } else {
                 Log.debug(message)
             }
+            finishIncidentIfNeeded(at: now, duration: duration)
         }
         renderer.enqueue(sampleBuffer)
         enqueuedFrameCount &+= 1
+        lastEnqueuedUptime = now
     }
 
     /// 捕获流即将 resume / restart：清掉旧队列但保留最后画面，下一帧自然接上。
     func prepareForCaptureDiscontinuity(_ reason: String) {
         let now = ProcessInfo.processInfo.systemUptime
+        diagnostics.record("capture.discontinuity \(reason)", at: now)
         lastIncomingPTS = nil
         lastPixelSize = nil
         renderHealth.reset()
@@ -245,6 +269,13 @@ final class PiPContentView: NSView {
 
     /// 关闭 / 重连时清空 layer 与所有待处理手势。
     func flushAndReset() {
+        let now = ProcessInfo.processInfo.systemUptime
+        diagnostics.record("renderer.reset removing-image=true", at: now)
+        if let id = currentIncidentID {
+            Log.warn("renderer incident \(id) 未等到 ready，因会话 reset 结束 [\(diagnosticLabel)]")
+            currentIncidentID = nil
+            currentIncidentStartedAt = nil
+        }
         flushToken &+= 1
         flushInFlightSince = nil
         displayLayer.sampleBufferRenderer.flush(
@@ -253,6 +284,7 @@ final class PiPContentView: NSView {
         renderHealth.reset()
         lastIncomingPTS = nil
         lastPixelSize = nil
+        lastRendererStateSignature = nil
         cancelSelection()
         resetDragTracking()
         pendingPan = .zero
@@ -286,14 +318,20 @@ final class PiPContentView: NSView {
 
     private func perform(_ action: RenderBackpressureMonitor.RecoveryAction,
                          at now: TimeInterval, reason: String, planned: Bool = false) {
+        guard action != .none else { return }
+        let isPlannedFlush = planned && action == .flush
+        if !isPlannedFlush { beginIncidentIfNeeded(at: now, trigger: reason) }
+
         switch action {
         case .none:
             return
         case .flush:
             beginRendererFlush(at: now, reason: reason, planned: planned)
         case .rebuildLayer:
+            diagnostics.record("recovery.rebuild-layer reason=\(reason)", at: now)
             rebuildDisplayLayer(reason: reason)
         case .restartCapture:
+            diagnostics.record("recovery.restart-capture reason=\(reason)", at: now)
             Log.error("renderer 自愈耗尽 [\(diagnosticLabel)]：请求重启捕获流（\(reason)）")
             onRendererRecoveryExhausted?()
         }
@@ -304,6 +342,7 @@ final class PiPContentView: NSView {
         flushToken &+= 1
         let token = flushToken
         flushInFlightSince = now
+        diagnostics.record("recovery.flush.begin planned=\(planned) reason=\(reason)", at: now)
         if planned {
             Log.debug("renderer 时间线重置 [\(diagnosticLabel)]：\(reason)")
         } else {
@@ -316,6 +355,11 @@ final class PiPContentView: NSView {
         ) { [weak self] in
             DispatchQueue.main.async {
                 guard let self, self.flushToken == token else { return }
+                let completedAt = ProcessInfo.processInfo.systemUptime
+                self.diagnostics.record(
+                    String(format: "recovery.flush.complete duration=%.3fs", completedAt - now),
+                    at: completedAt
+                )
                 self.flushInFlightSince = nil
             }
         }
@@ -343,7 +387,79 @@ final class PiPContentView: NSView {
         }
         lastIncomingPTS = nil
         lastPixelSize = nil
+        lastRendererStateSignature = nil
         Log.warn("renderer 卡流恢复 #\(rendererRecoveryCount) [\(diagnosticLabel)]：已重建 display layer，原因=\(reason)")
+    }
+
+    private func beginIncidentIfNeeded(at now: TimeInterval, trigger: String) {
+        guard currentIncidentID == nil else { return }
+        let id = "R-\(UUID().uuidString.prefix(8).uppercased())"
+        currentIncidentID = id
+        currentIncidentStartedAt = now
+        diagnostics.record("incident.begin id=\(id) trigger=\(trigger)", at: now)
+        let report = diagnostics.incidentReport(
+            id: id,
+            label: diagnosticLabel,
+            at: now,
+            trigger: trigger,
+            snapshot: rendererSnapshot(at: now)
+        )
+        Log.warn("\(report)\n  log file: \(Log.filePath)")
+        onRendererIncident?(id)
+    }
+
+    private func finishIncidentIfNeeded(at now: TimeInterval, duration: TimeInterval) {
+        guard let id = currentIncidentID else { return }
+        let totalDuration = currentIncidentStartedAt.map { max(0, now - $0) } ?? duration
+        diagnostics.record(
+            String(
+                format: "incident.recovered id=%@ totalDuration=%.3fs lastPhaseDuration=%.3fs",
+                id, totalDuration, duration
+            ),
+            at: now
+        )
+        Log.info("renderer incident \(id) 已恢复 [\(diagnosticLabel)]：总耗时 \(String(format: "%.3f", totalDuration))s；日志 \(Log.filePath)")
+        currentIncidentID = nil
+        currentIncidentStartedAt = nil
+        onRendererIncidentRecovered?(id)
+    }
+
+    private func recordRendererTransition(_ renderer: AVSampleBufferVideoRenderer,
+                                          at now: TimeInterval) {
+        let signature = rendererState(renderer)
+        guard signature != lastRendererStateSignature else { return }
+        lastRendererStateSignature = signature
+        diagnostics.record("renderer.state \(signature)", at: now)
+    }
+
+    private func rendererSnapshot(at now: TimeInterval) -> String {
+        let renderer = displayLayer.sampleBufferRenderer
+        let pixel = lastPixelSize.map { "\(Int($0.width))x\(Int($0.height))" } ?? "-"
+        let pts: String
+        if let lastIncomingPTS, lastIncomingPTS.isValid {
+            pts = String(format: "%.6f", CMTimeGetSeconds(lastIncomingPTS))
+        } else {
+            pts = "-"
+        }
+        let flushAge = age(since: flushInFlightSince, now: now)
+        return "\(rendererState(renderer)) incoming=\(incomingFrameCount) enqueued=\(enqueuedFrameCount) dropped=\(notReadyDropCount) lastIncomingAge=\(age(since: lastIncomingUptime, now: now)) lastEnqueuedAge=\(age(since: lastEnqueuedUptime, now: now)) flushAge=\(flushAge) pixel=\(pixel) pts=\(pts)"
+    }
+
+    private func rendererState(_ renderer: AVSampleBufferVideoRenderer) -> String {
+        let status: String
+        switch renderer.status {
+        case .unknown: status = "unknown"
+        case .rendering: status = "rendering"
+        case .failed: status = "failed"
+        @unknown default: status = "future(\(renderer.status.rawValue))"
+        }
+        let error = renderer.error.map { String(describing: $0) } ?? "-"
+        return "status=\(status) ready=\(renderer.isReadyForMoreMediaData) requiresFlush=\(renderer.requiresFlushToResumeDecoding) error=\(error)"
+    }
+
+    private func age(since uptime: TimeInterval?, now: TimeInterval) -> String {
+        guard let uptime else { return "-" }
+        return String(format: "%.3fs", max(0, now - uptime))
     }
 
     // MARK: - 响应链

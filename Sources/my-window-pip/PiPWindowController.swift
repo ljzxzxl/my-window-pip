@@ -404,6 +404,22 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         contentView.onRendererRecoveryExhausted = { [weak self] in
             self?.delegate?.pipRendererRecoveryExhausted()
         }
+        contentView.onRendererIncident = { [weak self] id in
+            self?.showHint(
+                L.t("检测到画面卡住，正在自动恢复（\(id) 已记录）",
+                    "Picture stalled; recovering automatically (\(id) logged)"),
+                near: nil,
+                duration: 5.0
+            )
+        }
+        contentView.onRendererIncidentRecovered = { [weak self] id in
+            self?.showHint(
+                L.t("画面已恢复（诊断编号 \(id)）",
+                    "Picture recovered (diagnostic ID \(id))"),
+                near: nil,
+                duration: 4.0
+            )
+        }
         // 干净的单击（无修饰键、未拖动）→ 请求切回源应用
         contentView.onRequestActivateSource = { [weak self] in
             self?.delegate?.pipRequestActivateSource()
@@ -650,6 +666,11 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     /// 捕获流即将 resume / restart：清掉旧 renderer 队列，避免新旧 PTS/格式混用。
     func prepareForCaptureDiscontinuity(_ reason: String) {
         contentView.prepareForCaptureDiscontinuity(reason)
+    }
+
+    /// 把捕获 / 会话层事件写入 renderer 的内存环形缓冲；仅故障时随快照落盘。
+    func recordRendererEvent(_ event: String) {
+        contentView.recordDiagnosticEvent(event)
     }
 
     // MARK: - 状态同步

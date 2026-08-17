@@ -32,6 +32,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **不跨帧持有 `CMSampleBuffer`**，`queueDepth = 3`，宁丢帧不积压。
 - **捕获健康与渲染健康分开监控**：`CaptureEngine` 的 watchdog 只判断 SCK 是否持续产帧；`RenderBackpressureMonitor` 判断 renderer 是否持续接收帧。短暂 not-ready 正常丢帧，连续 2 秒则按 `flush → 重建 display layer → 重启捕获流` 分级恢复。macOS 14+ 只通过 `AVSampleBufferDisplayLayer.sampleBufferRenderer` 查询状态、enqueue 和 flush，不要混用 display layer 上已废弃的旧队列 API。
 - **流不连续必须重置 renderer 时间线**：pause/resume、restart、源窗口重匹配、输出像素尺寸变化或 PTS 回退时，先 flush 旧队列并保留最后画面；普通平移/缩放且输出格式不变时不要无条件 flush，以免闪烁。
+- **renderer 诊断只在事故时落盘**：每个会话用 `RendererDiagnostics` 在内存保留最近 64 条生命周期事件；确认卡流后生成 `R-XXXXXXXX` 编号并把现场快照写入 `~/Library/Logs/MyWindowPip/MyWindowPip.log`。普通 retune/帧状态不要逐条写 Release 日志；日志最多 2 MB + 一个 previous 文件，不得记录画面像素或上传。
 - **防镜中镜**：浮窗 `sharingType = .none`；窗口枚举过滤自身 App；区域捕获的显示器过滤器按 App 排除自己。
 - **零权限优先**：任何功能都必须能在「只有屏幕录制权限」的前提下通过控制条或右键菜单完成；辅助功能权限只允许作为增强项。
 - **不用系统 tooltip**：浮窗 level 是 `.screenSaver`(1000)，系统 tooltip 窗口层级更低会被压在浮窗后面，而且初始延迟不可调。所有浮窗内的提示统一走 `PiPWindowController.showHint(_:near:duration:)`，它用一个 `addChildWindow` 挂在浮窗上的**子窗口**承载（这样才能画到浮窗顶边之外、显示在图标上方），子窗口必须 `ignoresMouseEvents = true`。新增按钮时把提示文案登记到 `OverlayControlsView` 的 hint 映射里，不要再写 `toolTip`。
@@ -131,7 +132,8 @@ codesign -d -r- build/MyWindowPip.app 2>&1 | grep 'designated =>'   # 不应出�
 ## 排查提示
 
 - 浮窗一片黑：先跑 `--selftest`。若权限正常但收不到帧，多半是源窗口最小化（系统不产帧）或流被 `FrameGate` 全过滤（画面完全静止）。
-- 浮窗停在旧画面但源窗口仍在变化：看 `--debug` 日志中的 `renderer 开始背压 / 卡流恢复 / 已重建 display layer`。不要只看 `CaptureEngine` 是否收帧——历史 bug 正是捕获持续正常、单个 renderer 队列却永久 not-ready。
+- 浮窗停在旧画面但源窗口仍在变化：确认浮窗出现带 `R-XXXXXXXX` 的自动恢复提示，然后保存 `~/Library/Logs/MyWindowPip/MyWindowPip.log`（以及同目录的 `MyWindowPip.previous.log`）。搜索该编号可看到卡住前最近 64 条会话事件、实际下发的 retune、PTS/像素尺寸、renderer 状态和分级恢复结果。不要只看 `CaptureEngine` 是否收帧——历史 bug 正是捕获持续正常、单个 renderer 队列却永久 not-ready。
+- 实时观察本地日志：`tail -f ~/Library/Logs/MyWindowPip/MyWindowPip.log`。日志包含窗口标题等运行元数据，但不含任何画面像素且不会上传；分享前按需脱敏。
 - 改帧率没反应：确认 `IdleDetector` 没把它压到 1 fps（`--debug` 日志里有「静止检测」记录）。
 - 热键没反应：`HotkeyManager.failedActions` 非空说明被别的应用占用，设置页会提示；`fn` 组合键必须开增强模式。
 - 增强模式突然失灵：系统会在负载高时禁用事件监听，`EventTapManager` 已监听 `tapDisabledByTimeout` 自动恢复，日志里能看到告警。

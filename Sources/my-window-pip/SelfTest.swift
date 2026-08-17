@@ -127,6 +127,9 @@ private final class FrameProbe: CaptureEngineDelegate {
     var lastPixelSize: CGSize? { lock.lock(); defer { lock.unlock() }; return size }
 
     func captureWillRestart() {}
+    func captureWillApplyConfiguration(id: UInt64, width: Int, height: Int,
+                                       fps: Int, sourceRect: CGRect) {}
+    func captureDidApplyConfiguration(id: UInt64, error: Error?) {}
 
     func captureDidOutput(_ sampleBuffer: CMSampleBuffer) {
         lock.lock()
