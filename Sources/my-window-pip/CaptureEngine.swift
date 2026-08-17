@@ -316,7 +316,7 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     // MARK: - 卡流检测
 
     /// 内部定时器：超过 `max(2s, 3/fps)` 没收到有效帧就报一次 `captureDidStall()`（主线程）。
-    /// 源窗口最小化、所在 Space 不可见时 SCK 会停止产出 `.complete` 帧，靠这个感知。
+    /// 源窗口最小化、被系统挂起或捕获链路暂时不可用时，SCK 可能停止产出 `.complete` 帧。
     private func startStallWatchdog() {
         stallLock.lock()
         lastFrameUptime = ProcessInfo.processInfo.systemUptime

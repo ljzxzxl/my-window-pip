@@ -53,8 +53,8 @@ final class ShareableContentStore: @unchecked Sendable {
     private var displaysCache: [SCDisplay] = []
     /// 窗口在其所属 App 内的序号（1 起），用于无标题窗口的兜底命名
     private var ordinalCache: [CGWindowID: Int] = [:]
-    /// 上次成功查询的时间（`systemUptime`，单调）；初值取负数保证首次即为过期
-    private var lastSuccessUptime: TimeInterval = -.greatestFiniteMagnitude
+    /// 上次成功查询的时间（`systemUptime`，单调）；nil 表示尚无可供立即展示的快照
+    private var lastSuccessUptime: TimeInterval?
 
     /// 以下两个字段只在主线程读写
     private var isFetching = false
@@ -187,9 +187,27 @@ final class ShareableContentStore: @unchecked Sendable {
     }
 
     /// 按 App 分组（每组按标题排序），供菜单栏渲染。
-    func grouped(completion: @escaping ([WindowGroup]) -> Void) {
-        withFreshCache { [weak self] in
-            completion(self?.groupsFromCache() ?? [])
+    ///
+    /// 已有快照时先同步返回缓存，让菜单立即可用；若缓存已过期，再后台刷新并以第二次回调
+    /// 更新打开中的菜单。首次查询没有可回退的快照，仍会等异步枚举完成后回调一次。
+    func grouped(completion: @escaping (Result<[WindowGroup], Error>) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        if hasSuccessfulSnapshot {
+            completion(.success(groupsFromCache()))
+            guard isCacheExpired else { return }
+            refresh { [weak self] result in
+                guard let self, case .success = result else { return }
+                completion(.success(self.groupsFromCache()))
+            }
+            return
+        }
+        refresh { [weak self] result in
+            switch result {
+            case .success:
+                completion(.success(self?.groupsFromCache() ?? []))
+            case let .failure(error):
+                completion(.failure(error))
+            }
         }
     }
 
@@ -209,7 +227,8 @@ final class ShareableContentStore: @unchecked Sendable {
                  completion: @escaping (SCWindow?) -> Void) {
         withFreshCache { [weak self] in
             guard let self else { completion(nil); return }
-            let candidates = self.cachedWindows.filter { window in
+            // 已经由 withFreshCache 负责刷新；直接取快照，避免刷新失败后 getter 立刻再发一次查询。
+            let candidates = self.withLock { self.candidatesCache }.filter { window in
                 guard let app = window.owningApplication else { return false }
                 if let bundleID, !bundleID.isEmpty { return app.bundleIdentifier == bundleID }
                 return app.applicationName.caseInsensitiveCompare(appName) == .orderedSame
@@ -221,7 +240,8 @@ final class ShareableContentStore: @unchecked Sendable {
     /// 按 displayID 找显示器（区域捕获重建流时用）。
     func display(id: CGDirectDisplayID, completion: @escaping (SCDisplay?) -> Void) {
         withFreshCache { [weak self] in
-            completion(self?.cachedDisplays.first { $0.displayID == id })
+            guard let self else { completion(nil); return }
+            completion(self.withLock { self.displaysCache.first { $0.displayID == id } })
         }
     }
 
@@ -264,7 +284,9 @@ final class ShareableContentStore: @unchecked Sendable {
 
     private func frontmostWindowFromCache() -> SCWindow? {
         let windows = withLock { candidatesCache }
-        let byID = Dictionary(uniqueKeysWithValues: windows.map { ($0.windowID, $0) })
+        // WindowServer 的 ID 按约定唯一；覆盖式构造仍可避免异常重复数据导致进程崩溃。
+        var byID: [CGWindowID: SCWindow] = [:]
+        for window in windows { byID[window.windowID] = window }
 
         // `SCShareableContent(... onScreenWindowsOnly: false)` 的结果还包含其他 Space 与最小化
         // 窗口，不能再依赖它的数组顺序。CGWindowList 给出当前 onscreen 窗口的前后顺序，
@@ -465,8 +487,11 @@ final class ShareableContentStore: @unchecked Sendable {
     // MARK: - 工具
 
     private var isExpiredLocked: Bool {
-        ProcessInfo.processInfo.systemUptime - lastSuccessUptime > Self.ttl
+        guard let lastSuccessUptime else { return true }
+        return ProcessInfo.processInfo.systemUptime - lastSuccessUptime > Self.ttl
     }
+
+    private var hasSuccessfulSnapshot: Bool { withLock { lastSuccessUptime != nil } }
 
     private func withLock<T>(_ body: () -> T) -> T {
         lock.lock()

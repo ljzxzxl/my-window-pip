@@ -455,7 +455,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     func captureDidStall() {
         guard !isClosed, !state.isPaused, !state.isHidden, !isAutoHidden else { return }
-        // 没有新帧通常意味着源窗口被最小化或所在 Space 不可见
+        // 没有新帧通常意味着源窗口最小化、被系统挂起或捕获链路暂时不可用。
         update(runtimeState: .waitingForSource)
         startProbeTimer()
     }

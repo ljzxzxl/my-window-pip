@@ -8,6 +8,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let windowsMenu = NSMenu()
     private var cachedGroups: [WindowGroup] = []
+    private enum WindowListState { case loading, loaded, failed }
+    private var windowListState: WindowListState = .loading
     private var pendingUpdate: ReleaseInfo?
 
     private let store = SessionStore.shared
@@ -87,9 +89,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     /// 异步刷新窗口列表；NSMenu 允许在打开状态下增删项，因此可以直接原地更新。
     private func refreshWindowList() {
-        ShareableContentStore.shared.grouped { [weak self] groups in
+        ShareableContentStore.shared.grouped { [weak self] result in
             guard let self else { return }
-            self.cachedGroups = groups
+            switch result {
+            case let .success(groups):
+                self.cachedGroups = groups
+                self.windowListState = .loaded
+            case .failure:
+                // 没有成功快照时才会返回 failure；已有旧缓存则继续显示旧缓存。
+                self.windowListState = .failed
+            }
             self.populateWindowsMenu()
         }
     }
@@ -215,9 +224,27 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func populateWindowsMenu() {
         windowsMenu.removeAllItems()
 
+        guard Permissions.hasScreenRecording else {
+            let item = NSMenuItem(
+                title: L.t("授权屏幕录制后可选择窗口", "Grant Screen Recording access to choose a window"),
+                action: nil, keyEquivalent: ""
+            )
+            item.isEnabled = false
+            windowsMenu.addItem(item)
+            return
+        }
+
         guard !cachedGroups.isEmpty else {
-            let item = NSMenuItem(title: L.t("正在读取窗口列表…", "Loading windows…"),
-                                  action: nil, keyEquivalent: "")
+            let title: String
+            switch windowListState {
+            case .loading:
+                title = L.t("正在读取窗口列表…", "Loading windows…")
+            case .loaded:
+                title = L.t("未找到可用窗口", "No available windows")
+            case .failed:
+                title = L.t("暂时无法读取窗口列表", "Could not load windows")
+            }
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.isEnabled = false
             windowsMenu.addItem(item)
             return
@@ -235,19 +262,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
             for window in group.windows {
                 let title = ShareableContentStore.shared.displayTitle(for: window)
-                // SCK 没有公开字段区分「其他 Space」与「已最小化」；测试版把两者都保留，
-                // 并明确标记，便于验证非当前 Space 的窗口能否持续产出实时帧。
+                // SCK 没有公开字段区分「其他 Space」与「已最小化」。其他 Space 的普通窗口
+                // 可以持续捕获，因此保留所有候选，并对当前不在屏幕上的项做中性标记。
                 let availability = window.isOnScreen ? "" : L.t("（未显示）", " (not visible)")
                 let item = NSMenuItem(title: "  \(title)\(availability)", action: #selector(pipWindow(_:)),
                                       keyEquivalent: "")
                 item.target = self
                 item.representedObject = NSNumber(value: window.windowID)
-                item.toolTip = window.isOnScreen
-                    ? "windowID=\(window.windowID) · isActive=\(window.isActive)"
-                    : L.t(
-                        "窗口位于其他 Space、屏幕外或已最小化 · windowID=\(window.windowID) · isActive=\(window.isActive)",
-                        "Window is in another Space, offscreen, or minimized · windowID=\(window.windowID) · isActive=\(window.isActive)"
+                if !window.isOnScreen {
+                    item.toolTip = L.t(
+                        "窗口可能位于其他 Space、屏幕外或已最小化",
+                        "Window may be in another Space, offscreen, or minimized"
                     )
+                }
                 if store.session(windowID: window.windowID) != nil {
                     item.state = .on   // 已经有浮窗
                 }
