@@ -113,6 +113,8 @@ private final class FrameProbe: CaptureEngineDelegate {
     var frameCount: Int { lock.lock(); defer { lock.unlock() }; return frames }
     var lastPixelSize: CGSize? { lock.lock(); defer { lock.unlock() }; return size }
 
+    func captureWillRestart() {}
+
     func captureDidOutput(_ sampleBuffer: CMSampleBuffer) {
         lock.lock()
         frames += 1
