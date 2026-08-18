@@ -200,6 +200,8 @@ protocol PiPWindowDelegate: AnyObject {
     func pipRequestToggleClickToActivate()
     /// 显示层经 flush + 重建后仍无法接收帧，请求会话层重启捕获流。
     func pipRendererRecoveryExhausted()
+    /// renderer 卡流已恢复：会话层据此清零重启限流计数。
+    func pipRendererDidRecover()
     /// 右键菜单将要更新：会话可趁此按需刷新源窗口标题
     func pipMenuWillOpen()
     func pipDidMove()

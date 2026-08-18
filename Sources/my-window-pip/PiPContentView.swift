@@ -185,6 +185,10 @@ final class PiPContentView: NSView {
         diagnostics.record(event, at: ProcessInfo.processInfo.systemUptime)
     }
 
+    /// 仅用于 `--smoke-renderer`：验证计划性 flush 之后帧仍能继续入队。
+    var debugEnqueuedFrameCount: UInt64 { enqueuedFrameCount }
+    var debugNotReadyDropCount: UInt64 { notReadyDropCount }
+
     // MARK: - 帧入队
 
     /// 主线程调用。宁丢帧不积压：layer 不接收时直接丢弃当前帧。

@@ -40,6 +40,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     /// 悬停上升沿判定（`HoverMonitor` 只在状态变化时回调，这里再收敛到「进入」这一个时机）
     private var wasHovering = false
     private var isClosed = false
+    /// renderer 自愈触发的捕获流重启时刻，用于限流
+    private var rendererRestartTimes: [TimeInterval] = []
 
     private static let hiddenAutoCloseSeconds: TimeInterval = 60
     private static let maxReconnectAttempts = 3
@@ -47,6 +49,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private static let geometryRecheckDelay: TimeInterval = 1.2
     /// 标题按需刷新的最小间隔：挡住悬停抖动与菜单反复开合
     private static let titleRefreshThrottle: TimeInterval = 0.5
+    /// renderer 自愈重启的限流窗口与窗口内上限
+    private static let rendererRestartWindow: TimeInterval = 90
+    private static let rendererRestartLimit = 2
 
     // MARK: - 生命周期
 
@@ -156,6 +161,12 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     var debugSourceRect: CGRect { currentSourceRect() }
     /// 仅用于 `--smoke-mc`：立即跑一次源窗口探测（平时由卡流检测驱动）
     func debugProbeNow() { probeSource() }
+    /// 仅用于 `--smoke-renderer`：入队/丢帧计数与手动触发一次计划性 flush
+    var debugEnqueuedFrameCount: UInt64 { windowController.debugEnqueuedFrameCount }
+    var debugNotReadyDropCount: UInt64 { windowController.debugNotReadyDropCount }
+    func debugForceDiscontinuity(_ reason: String) {
+        windowController.prepareForCaptureDiscontinuity(reason)
+    }
 
     func setLevelMode(_ mode: WindowLevelMode) { windowController.setLevelMode(mode) }
 
@@ -786,11 +797,32 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     func pipRequestTogglePause() { setPaused(!state.isPaused) }
 
+    /// renderer 永久损坏时，重启捕获流并不会救回来，而 `captureWillRestart` 又会重置卡流状态机，
+    /// 于是「自愈耗尽 → 重启 → 再次耗尽」可以无限循环，每轮都重建一次 SCStream。这里限流：
+    /// 窗口期内超过上限就停手并明确告知用户，成功恢复一次即清零。
     func pipRendererRecoveryExhausted() {
         guard !isClosed, !state.isPaused, !state.isHidden else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        rendererRestartTimes = rendererRestartTimes.filter { now - $0 < Self.rendererRestartWindow }
+        guard rendererRestartTimes.count < Self.rendererRestartLimit else {
+            Log.error("""
+                renderer 自愈已达上限（\(Self.rendererRestartWindow)s 内 \
+                \(Self.rendererRestartLimit) 次），停止自动重启：\(state.source.displayTitle)
+                """)
+            windowController.showHint(
+                L.t("画面无法自动恢复，请关闭浮窗后重开",
+                    "Could not recover automatically — close and reopen this PiP"),
+                near: nil,
+                duration: 6.0
+            )
+            return
+        }
+        rendererRestartTimes.append(now)
         Log.warn("显示层自愈失败，升级为重启捕获流：\(state.source.displayTitle)")
         restartCapture(reason: "renderer 自愈耗尽")
     }
+
+    func pipRendererDidRecover() { rendererRestartTimes.removeAll() }
 
     func pipRequestActivateSource() { activateSource() }
 

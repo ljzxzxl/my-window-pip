@@ -405,6 +405,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
             self?.delegate?.pipRendererRecoveryExhausted()
         }
         contentView.onRendererIncidentRecovered = { [weak self] id in
+            self?.delegate?.pipRendererDidRecover()
             self?.showHint(
                 L.t("画面已自动恢复（日志编号 \(id)）",
                     "Picture recovered automatically (log ID \(id))"),
@@ -664,6 +665,10 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     func recordRendererEvent(_ event: String) {
         contentView.recordDiagnosticEvent(event)
     }
+
+    /// 仅用于 `--smoke-renderer`
+    var debugEnqueuedFrameCount: UInt64 { contentView.debugEnqueuedFrameCount }
+    var debugNotReadyDropCount: UInt64 { contentView.debugNotReadyDropCount }
 
     // MARK: - 状态同步
 

@@ -1,11 +1,17 @@
 import Foundation
 
 /// 轻量分级日志。用 `--debug` 构建（-D DEBUG）时才输出 debug 级别。
-/// info / warn / error（以及 DEBUG 构建中的 debug）同时写入本地滚动日志，永不上传。
+///
+/// 只有 warn / error 会写入本地滚动日志——事故现场快照本身就是 `Log.warn`，排障能力不减，
+/// 而 info 级里带着窗口标题（「新建窗口 PiP：<标题>」），正常使用不应该把它留在磁盘上。
+/// 日志永不上传。
 enum Log {
     private static let prefix = "[MyWindowPip]"
-    private static let lock = NSLock()
     private static let maxLogBytes: UInt64 = 2 * 1024 * 1024
+    /// 落盘串行队列：帧回调也会打日志，磁盘 I/O 绝不能占着锁卡住捕获队列或主线程。
+    private static let fileQueue = DispatchQueue(
+        label: "com.ljzxzxl.mywindowpip.log", qos: .utility
+    )
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -24,17 +30,15 @@ enum Log {
 
     static var filePath: String { fileURL.path }
 
-    private static func emit(_ level: String, _ items: [Any]) {
+    private static func emit(_ level: String, _ items: [Any], persist: Bool) {
         let msg = items.map { "\($0)" }.joined(separator: " ")
-        lock.lock()
-        defer { lock.unlock() }
-
         let line = "\(prefix)[\(formatter.string(from: Date()))][\(level)] \(msg)"
         print(line)
-        appendToFile(line + "\n")
+        guard persist else { return }
+        fileQueue.async { appendToFile(line + "\n") }
     }
 
-    /// 必须在 `lock` 内调用。
+    /// 只在 `fileQueue` 上调用；队列本身串行，不需要额外加锁。
     private static func appendToFile(_ text: String) {
         let manager = FileManager.default
         let directory = fileURL.deletingLastPathComponent()
@@ -65,11 +69,11 @@ enum Log {
 
     static func debug(_ items: Any...) {
         #if DEBUG
-        emit("D", items)
+        emit("D", items, persist: false)
         #endif
     }
 
-    static func info(_ items: Any...) { emit("I", items) }
-    static func warn(_ items: Any...) { emit("W", items) }
-    static func error(_ items: Any...) { emit("E", items) }
+    static func info(_ items: Any...) { emit("I", items, persist: false) }
+    static func warn(_ items: Any...) { emit("W", items, persist: true) }
+    static func error(_ items: Any...) { emit("E", items, persist: true) }
 }
