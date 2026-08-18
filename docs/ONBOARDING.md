@@ -52,7 +52,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 
 ```bash
 bash scripts/build-app.sh --fast --debug     # 开发期快速构建（单架构 + 日志 + 自检断言）
-swift test                                  # renderer 卡流与自愈状态机测试（需完整 Xcode，仅 CLT 会报 no such module 'XCTest'）
+swift test                                  # renderer 自愈与窗口磁吸测试（需完整 Xcode，仅 CLT 会报 no such module 'XCTest'）
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --selftest              # 权限与捕获链路自检
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke 10              # 自动开一路 PiP 跑 10 秒再退出
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke 60 --smoke-sessions 4   # 多路并发压测
