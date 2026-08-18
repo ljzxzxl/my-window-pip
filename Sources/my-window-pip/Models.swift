@@ -74,9 +74,14 @@ enum WindowLevelMode: String, CaseIterable {
     /// 普通置顶：仅当前 Space，不侵入全屏应用。
     case normal
 
+    /// 比 `.popUpMenu`(101) 低一级：仍压在普通窗口(0)、浮动面板(3)、别的 App 的模态面板(8)、
+    /// 菜单栏本体(25) 之上，但让开状态栏工具的下拉菜单——浮窗放右上角时不再挡住那些菜单。
+    /// 不用 `.screenSaver`(1000) 就是因为它高于 101。
+    static let globalLevel = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue - 1)
+
     var windowLevel: NSWindow.Level {
         switch self {
-        case .global: return .screenSaver
+        case .global: return Self.globalLevel
         case .normal: return .floating
         }
     }

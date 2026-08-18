@@ -42,7 +42,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 - Turn the frontmost window into a PiP with one hotkey (`⌃⌥P`), or pick a window from the menu bar list.
 - Capture any screen region (`⌃⌥⇧P`); if the selection lands inside a window, a window stream is used instead, so it follows the window and keeps working when the window is covered.
 - Multiple PiP windows at once, cascaded automatically; position and width remembered per app.
-- Floating, borderless, aspect-locked, visible on all Spaces and above full-screen apps.
+- Floating, borderless, aspect-locked, visible on all Spaces and above full-screen apps — but below system pop-up menus, so menu bar utilities still open on top of it.
 
 **Zoom & pan**
 - `Cmd`-drag to zoom into a region, `Cmd`-scroll to change the factor (anchored at the pointer), `Cmd`-double-click to reset. Range 1×–20×.
@@ -158,6 +158,7 @@ Built-in self-tests (no UI, useful after any change):
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # exact source window + on-demand title
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc         # Mission Control geometry regression
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-renderer   # renderer stall detection + recovery escalation
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-level      # window level stays below system pop-up menus
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # real download + SHA256 check
 ```
 
@@ -202,7 +203,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 - 一键把前台窗口变浮窗（`⌃⌥P`），或从菜单栏窗口列表里挑。
 - 框选任意屏幕区域做画中画（`⌃⌥⇧P`）；选区落在某个窗口内时自动改用窗口流，可跟随窗口移动、被遮挡也能捕获。
 - 多个浮窗同时运行，自动错位摆放，位置与宽度按应用记忆。
-- 浮窗置顶、可在所有 Space 与全屏应用之上显示、无边框、锁定宽高比。
+- 浮窗置顶、可在所有 Space 与全屏应用之上显示、无边框、锁定宽高比；但层级低于系统下拉菜单，浮窗放右上角也不会挡住菜单栏工具的菜单。
 
 **缩放与平移**
 - `Cmd` + 拖拽框选放大，`Cmd` + 滚轮以指针为锚调倍率，`Cmd` + 双击复位，范围 1×–20×。
@@ -318,6 +319,7 @@ swift test                             # renderer 卡流与自愈状态机单元
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # 精确回源窗口 + 标题按需刷新
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc         # 调度中心几何污染回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-renderer   # renderer 卡流检测与分级自愈回归
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-level      # 浮窗层级不压住系统下拉菜单
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # 真实下载 + SHA256 校验
 ```
 

@@ -206,7 +206,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         addItem(title: L.t("设置…", "Settings…"), hint: nil, symbol: "gearshape",
                 action: #selector(openSettings))
         addItem(title: L.t("检查更新…", "Check for Updates…"), hint: nil, symbol: "arrow.down.circle",
-                action: #selector(checkUpdates), badge: Updater.currentVersion)
+                action: #selector(checkUpdates), badge: "v\(Updater.currentVersion)")
         menu.addItem(.separator())
         addItem(title: L.t("退出 MyWindowPip", "Quit MyWindowPip"), hint: "⌘Q", symbol: "power",
                 action: #selector(quit))

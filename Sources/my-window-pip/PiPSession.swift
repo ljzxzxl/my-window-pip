@@ -170,6 +170,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func debugForceDiscontinuity(_ reason: String) {
         windowController.prepareForCaptureDiscontinuity(reason)
     }
+    /// 仅用于 `--smoke-level`：浮窗与提示条子窗口的实际层级
+    var debugWindowLevel: Int { windowController.debugWindowLevel }
+    var debugHintWindowLevel: Int { windowController.debugHintWindowLevel }
 
     func setLevelMode(_ mode: WindowLevelMode) { windowController.setLevelMode(mode) }
 

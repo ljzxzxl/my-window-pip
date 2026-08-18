@@ -62,6 +62,7 @@ swift test                                  # renderer 卡流与自愈状态机�
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate        # 精确回源窗口 + 标题按需刷新回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc              # 调度中心几何污染回归（会开合调度中心）
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-renderer        # renderer 卡流状态机 + 计划性 flush 后仍能入队
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-level           # 浮窗层级边界（statusBar(25) < 100 < popUpMenu(101)）
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update          # 更新链路回归（真实下载 + SHA256 校验）
 bash scripts/reset-permission.sh             # 重建后重置 TCC 记录
 ```
