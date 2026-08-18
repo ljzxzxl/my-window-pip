@@ -62,7 +62,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 - While faded you can also hold `⌥` to peek at the whole window, or turn auto-hide off from the window's menu bar submenu. The faded opacity is configurable in 5% steps (default 35%).
 - Hover overlay controls: pause, frame rate, reset zoom, auto-hide, idle detection, close. Icons highlight on hover and the description appears instantly above the icon.
 - Source minimized → placeholder and automatic resume; source closed → notice, then auto-close; source app relaunched → reconnect by app + title.
-- Update check via GitHub Releases: downloads show a progress panel you can watch or cancel, the DMG is verified against the published SHA256, and on slow connections you can retry or switch to your browser with one click.
+- Update check via GitHub Releases: the menu shows your current version in grey next to *Check for Updates…*; downloads show a progress panel you can watch or cancel, the DMG is verified against the published SHA256, and on slow connections you can retry or switch to your browser with one click.
 
 ### Shortcuts
 
@@ -222,7 +222,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 - 淡出后也可以按住 `⌥` 临时唤回整窗，或在菜单栏的浮窗子菜单里关掉自动隐藏。淡出透明度可调，5% 一档（默认 35%）。
 - 悬停浮出控制条：暂停、帧率、复位缩放、自动隐藏、静止检测、关闭；图标有悬停高亮，说明文字立刻显示在图标上方。
 - 源窗口最小化 → 显示占位并自动等待恢复；源窗口关闭 → 提示后自动关闭；源应用退出后重开 → 按应用 + 标题重连。
-- 检查更新（GitHub Releases）：下载有独立进度面板可看可取消，自动用 Release 里的 SHA256 校验完整性；网络慢导致失败时可一键重试或改用浏览器下载。
+- 检查更新（GitHub Releases）：菜单里「检查更新…」右侧用灰色小字显示当前版本号；下载有独立进度面板可看可取消，自动用 Release 里的 SHA256 校验完整性；网络慢导致失败时可一键重试或改用浏览器下载。
 
 ### 快捷键
 

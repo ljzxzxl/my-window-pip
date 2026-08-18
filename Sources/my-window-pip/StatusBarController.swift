@@ -206,7 +206,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         addItem(title: L.t("设置…", "Settings…"), hint: nil, symbol: "gearshape",
                 action: #selector(openSettings))
         addItem(title: L.t("检查更新…", "Check for Updates…"), hint: nil, symbol: "arrow.down.circle",
-                action: #selector(checkUpdates))
+                action: #selector(checkUpdates), badge: Updater.currentVersion)
         menu.addItem(.separator())
         addItem(title: L.t("退出 MyWindowPip", "Quit MyWindowPip"), hint: "⌘Q", symbol: "power",
                 action: #selector(quit))
@@ -251,9 +251,24 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func addItem(title: String, hint: String?, symbol: String, action: Selector) {
+    /// `badge` 用灰色小字追加在标题后面（当前版本号这类弱化信息），`hint` 是同色的快捷键提示。
+    private func addItem(title: String, hint: String?, symbol: String, action: Selector,
+                         badge: String? = nil) {
         let fullTitle = hint == nil ? title : "\(title)　\(hint!)"
         let item = NSMenuItem(title: fullTitle, action: action, keyEquivalent: "")
+        if let badge {
+            let font = NSFont.menuFont(ofSize: 0)
+            let text = NSMutableAttributedString(
+                string: fullTitle,
+                attributes: [.font: font, .foregroundColor: NSColor.labelColor]
+            )
+            text.append(NSAttributedString(
+                string: "　\(badge)",
+                attributes: [.font: NSFont.menuFont(ofSize: font.pointSize - 1),
+                             .foregroundColor: NSColor.secondaryLabelColor]
+            ))
+            item.attributedTitle = text
+        }
         item.target = self
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         menu.addItem(item)
