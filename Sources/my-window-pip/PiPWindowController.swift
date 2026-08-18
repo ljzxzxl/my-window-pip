@@ -395,6 +395,18 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
             self?.delegate?.pipRequestToggleIdleDetection()
         }
         contentView.onRequestTogglePause = { [weak self] in self?.delegate?.pipRequestTogglePause() }
+        contentView.onRendererRecoveryExhausted = { [weak self] in
+            self?.delegate?.pipRendererRecoveryExhausted()
+        }
+        contentView.onRendererIncidentRecovered = { [weak self] id in
+            self?.delegate?.pipRendererDidRecover()
+            self?.showHint(
+                L.t("画面已自动恢复（日志编号 \(id)）",
+                    "Picture recovered automatically (log ID \(id))"),
+                near: nil,
+                duration: 4.0
+            )
+        }
         // 干净的单击（无修饰键、未拖动）→ 请求切回源应用
         contentView.onRequestActivateSource = { [weak self] in
             self?.delegate?.pipRequestActivateSource()
@@ -639,6 +651,20 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         contentView.enqueue(sampleBuffer)
     }
 
+    /// 捕获流即将 resume / restart：清掉旧 renderer 队列，避免新旧 PTS/格式混用。
+    func prepareForCaptureDiscontinuity(_ reason: String) {
+        contentView.prepareForCaptureDiscontinuity(reason)
+    }
+
+    /// 把捕获 / 会话层事件写入 renderer 的内存环形缓冲；仅故障时随快照落盘。
+    func recordRendererEvent(_ event: String) {
+        contentView.recordDiagnosticEvent(event)
+    }
+
+    /// 仅用于 `--smoke-renderer`
+    var debugEnqueuedFrameCount: UInt64 { contentView.debugEnqueuedFrameCount }
+    var debugNotReadyDropCount: UInt64 { contentView.debugNotReadyDropCount }
+
     // MARK: - 状态同步
 
     func update(state: PiPSessionState) {
@@ -675,6 +701,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     func setTitle(_ title: String) {
         titleText = title
         panel.title = title
+        contentView.setDiagnosticLabel(title)
         overlay.titleText = title
         titleItem.title = title
     }

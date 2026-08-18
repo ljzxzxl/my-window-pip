@@ -23,6 +23,8 @@ jobs:
             exit 1
           fi
 
+      # 发布只依赖 build-app.sh（swiftc，仅 Command Line Tools 也能跑）。
+      # 单元测试放在 ci.yml：XCTest 只随完整 Xcode 提供，不能让它成为发版的前置依赖。
       # 发布包必须用固定身份签名：TCC 记的是 designated requirement，
       # ad-hoc 签名会退化成钉死 cdhash，用户每次升级都要重新授权录屏。
       - name: 导入签名证书

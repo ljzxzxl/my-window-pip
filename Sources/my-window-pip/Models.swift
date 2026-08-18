@@ -167,6 +167,8 @@ enum SessionRuntimeState: Equatable {
 protocol CaptureEngineDelegate: AnyObject {
     /// 在捕获队列（**非主线程**）调用，已通过帧闸门过滤，只会收到 `.complete` 帧。
     func captureDidOutput(_ sampleBuffer: CMSampleBuffer)
+    /// 主线程调用：引擎即将重建 SCStream；展示层应先重置旧 renderer 时间线。
+    func captureWillRestart()
     /// 主线程调用：流已停止（error 为 nil 表示主动停止）。
     func captureDidStop(error: Error?)
     /// 主线程调用：一段时间内未收到有效帧（源可能被最小化或遮挡）。
@@ -196,6 +198,10 @@ protocol PiPWindowDelegate: AnyObject {
     func pipRequestActivateSource()
     /// 切换「单击浮窗切换到源应用」开关
     func pipRequestToggleClickToActivate()
+    /// 显示层经 flush + 重建后仍无法接收帧，请求会话层重启捕获流。
+    func pipRendererRecoveryExhausted()
+    /// renderer 卡流已恢复：会话层据此清零重启限流计数。
+    func pipRendererDidRecover()
     /// 右键菜单将要更新：会话可趁此按需刷新源窗口标题
     func pipMenuWillOpen()
     /// 拖动窗口时请求上层根据屏幕与其他 PiP 修正位置（尺寸由窗口层保持不变）

@@ -62,7 +62,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 - While faded you can also hold `⌥` to peek at the whole window, or turn auto-hide off from the window's menu bar submenu. The faded opacity is configurable in 5% steps (default 35%).
 - Hover overlay controls: pause, frame rate, reset zoom, auto-hide, idle detection, close. Icons highlight on hover and the description appears instantly above the icon.
 - Source minimized → placeholder and automatic resume; source closed → notice, then auto-close; source app relaunched → reconnect by app + title.
-- Update check via GitHub Releases: downloads show a progress panel you can watch or cancel, the DMG is verified against the published SHA256, and on slow connections you can retry or switch to your browser with one click.
+- Update check via GitHub Releases: the menu shows your current version in grey next to *Check for Updates…*; downloads show a progress panel you can watch or cancel, the DMG is verified against the published SHA256, and on slow connections you can retry or switch to your browser with one click.
 
 ### Shortcuts
 
@@ -92,7 +92,10 @@ The system prompt appears on first launch and the app registers itself under *Sy
 
 Release builds from v0.1.4 on are signed with a stable identity, so the grant **survives app updates**. If you are upgrading from v0.1.3 or earlier, macOS may ask once more because the old build left a stale record: click **Reset permission record** in the guide dialog, relaunch, and allow — later updates will keep it. Also drag the app into `/Applications` before running it; launching from the DMG or Downloads folder makes macOS randomise the path, which confuses the grant.
 
-Frames stay in local memory and VRAM: nothing is written to disk, uploaded, or reported. The app makes no network requests other than update checks.
+Frames stay in local memory and VRAM: no pixels are written to disk, uploaded, or reported. Only warnings and
+renderer incident snapshots (window title, capture configuration and renderer state — never frame contents) are
+written to `~/Library/Logs/MyWindowPip/MyWindowPip.log`; normal operation writes nothing at all. It rotates at
+2 MB, keeps one previous file, and is never uploaded. The app makes no network requests other than update checks.
 
 ### Download
 
@@ -141,6 +144,7 @@ bash scripts/build-app.sh --fast       # current architecture only
 bash scripts/build-app.sh --debug      # DEBUG logging + geometry self-checks
 bash scripts/build-app.sh --install    # also install to /Applications
 bash packaging/make-dmg.sh             # dist/MyWindowPip-<version>.dmg + SHA256
+swift test                             # deterministic renderer recovery tests (needs full Xcode)
 ```
 
 Built-in self-tests (no UI, useful after any change):
@@ -153,22 +157,27 @@ Built-in self-tests (no UI, useful after any change):
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding # first-launch overlay
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # exact source window + on-demand title
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc         # Mission Control geometry regression
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-renderer   # renderer stall detection + recovery escalation
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # real download + SHA256 check
 ```
 
-Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishes a GitHub Release.
+Pull requests and pushes to `main` run the warning-free build and unit tests on macOS 14 (GitHub runners ship a
+full Xcode). Pushing a `v*` tag (matching `VERSION`) builds the universal binary with `scripts/build-app.sh`,
+verifies the signature and publishes a GitHub Release — the release path deliberately does not depend on XCTest.
 
 ### Repository layout
 
 | Path | Purpose |
 |---|---|
 | `Sources/my-window-pip/` | All Swift sources: capture layer (`CaptureEngine`, `ShareableContentStore`, `FrameGate`, `IdleDetector`), presentation layer (`PiPWindowController`, `PiPContentView`, overlay views), session layer (`PiPSession`, `SessionStore`), input layer (hotkeys, event tap, hover monitor, region selection) and foundation (`Models`, `Geo`, `Preferences`, `Permissions`, `Updater`) |
+| `Tests/MyWindowPipTests/` | Deterministic unit tests for renderer stalls and recovery escalation |
 | `Resources/` | `Info.plist` and the 1024×1024 icon source |
 | `scripts/build-app.sh` | Builds both architectures with `swiftc`, assembles the `.app`, generates `AppIcon.icns`, signs with the fixed identity |
 | `scripts/reset-permission.sh` | Resets this app's Screen Recording / Accessibility TCC records |
 | `scripts/ci-import-cert.sh` | CI only: imports the signing certificate from Secrets into a temporary keychain |
 | `packaging/make-dmg.sh` | Produces the DMG and its SHA256 |
 | `docs/` | App icon and the [ONBOARDING](docs/ONBOARDING.md) handover doc (architecture, conventions, pitfalls) |
+| `.github/workflows/ci.yml` | Builds with warnings as errors and runs unit tests on pull requests and `main` |
 | `.github/workflows/release.yml` | Verifies tag vs `VERSION`, builds, publishes the Release |
 
 ### Notes
@@ -213,7 +222,7 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 - 淡出后也可以按住 `⌥` 临时唤回整窗，或在菜单栏的浮窗子菜单里关掉自动隐藏。淡出透明度可调，5% 一档（默认 35%）。
 - 悬停浮出控制条：暂停、帧率、复位缩放、自动隐藏、静止检测、关闭；图标有悬停高亮，说明文字立刻显示在图标上方。
 - 源窗口最小化 → 显示占位并自动等待恢复；源窗口关闭 → 提示后自动关闭；源应用退出后重开 → 按应用 + 标题重连。
-- 检查更新（GitHub Releases）：下载有独立进度面板可看可取消，自动用 Release 里的 SHA256 校验完整性；网络慢导致失败时可一键重试或改用浏览器下载。
+- 检查更新（GitHub Releases）：菜单里「检查更新…」右侧用灰色小字显示当前版本号；下载有独立进度面板可看可取消，自动用 Release 里的 SHA256 校验完整性；网络慢导致失败时可一键重试或改用浏览器下载。
 
 ### 快捷键
 
@@ -243,7 +252,10 @@ Pushing a `v*` tag (matching `VERSION`) builds the universal binary and publishe
 
 v0.1.4 起发布包使用固定签名身份，**授权可以跨版本存活**，更新后不再重新索要。从 v0.1.3 及更早版本升级上来时，因为旧包留下的是失效记录，还会被要求授权一次：在引导框里点**「重置授权记录」**→ 重启 → 允许，之后所有更新都会保留。另外请把 App 拖进 `/Applications` 再运行——直接从 DMG 或下载目录启动会被 macOS 随机化路径，同样会干扰授权。
 
-画面只在本机内存与显存中流转：不写磁盘、不上传、不做任何遥测；除主动检查更新外不发起任何网络请求。
+画面只在本机内存与显存中流转：像素内容不写磁盘、不上传、不做任何遥测。只有告警与 renderer 事故现场
+（窗口标题、捕获配置、renderer 状态，不含画面内容）会写入
+`~/Library/Logs/MyWindowPip/MyWindowPip.log`，正常使用不写任何内容；达到 2 MB 自动轮转并只保留一个历史文件，永不上传。
+除主动检查更新外不发起任何网络请求。
 
 ### 下载
 
@@ -292,6 +304,7 @@ bash scripts/build-app.sh --fast       # 只编当前架构，开发期更快
 bash scripts/build-app.sh --debug      # 带 DEBUG 日志与几何自检
 bash scripts/build-app.sh --install    # 顺带安装到 /Applications
 bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + SHA256
+swift test                             # renderer 卡流与自愈状态机单元测试（需完整 Xcode）
 ```
 
 内置自检（不开界面，改完代码跑一遍最省事）：
@@ -304,22 +317,27 @@ bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + 
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding # 首启引导浮层
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate   # 精确回源窗口 + 标题按需刷新
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc         # 调度中心几何污染回归
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-renderer   # renderer 卡流检测与分级自愈回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # 真实下载 + SHA256 校验
 ```
 
-推送与 `VERSION` 一致的 `v*` tag 会自动构建通用二进制并发布 Release。
+PR 与推送到 `main` 会在 macOS 14 上执行零警告编译和单元测试（GitHub runner 自带完整 Xcode）；推送与
+`VERSION` 一致的 `v*` tag 则用 `scripts/build-app.sh` 构建通用二进制、校验签名并发布 Release——
+发版路径刻意不依赖 XCTest。
 
 ### 仓库结构
 
 | 路径 | 用途 |
 |---|---|
 | `Sources/my-window-pip/` | 全部 Swift 源码：捕获层（`CaptureEngine`、`ShareableContentStore`、`FrameGate`、`IdleDetector`）、展示层（`PiPWindowController`、`PiPContentView`、控制条与占位视图）、会话层（`PiPSession`、`SessionStore`）、输入层（热键、事件监听、悬停轮询、区域框选）、基础层（`Models`、`Geo`、`Preferences`、`Permissions`、`Updater`） |
+| `Tests/MyWindowPipTests/` | renderer 卡流检测与分级自愈的确定性单元测试 |
 | `Resources/` | `Info.plist` 与 1024×1024 图标源文件 |
 | `scripts/build-app.sh` | 用 `swiftc` 编双架构、组装 `.app`、生成 `AppIcon.icns`、用固定身份签名 |
 | `scripts/reset-permission.sh` | 重置本应用的屏幕录制 / 辅助功能 TCC 记录 |
 | `scripts/ci-import-cert.sh` | 仅 CI 用：把 Secrets 里的签名证书导入临时 keychain |
 | `packaging/make-dmg.sh` | 打包 DMG 并生成 SHA256 |
 | `docs/` | 应用图标与[交接文档 ONBOARDING](docs/ONBOARDING.md)（架构、约定、踩过的坑） |
+| `.github/workflows/ci.yml` | 在 PR 与 `main` 上将警告视为错误地编译，并运行单元测试 |
 | `.github/workflows/release.yml` | 校验 tag 与 `VERSION` 一致后构建并发布 Release |
 
 ### 说明

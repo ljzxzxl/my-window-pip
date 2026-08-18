@@ -12,7 +12,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
             ↓                    ↓
 捕获层    CaptureEngine        展示层  PiPWindowController(NSPanel)
           ShareableContentStore         PiPContentView(AVSampleBufferDisplayLayer)
-          FrameGate · IdleDetector      OverlayControlsView · PlaceholderView
+          FrameGate · IdleDetector      RendererStallMonitor · OverlayControlsView · PlaceholderView
             ↓
 基础层    Models(契约) · Geo(坐标/缩放数学) · Preferences · Permissions · L10n · Log · Updater · LoginItem
 ```
@@ -21,7 +21,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 
 1. 输入层产生动作 → `SessionStore` 构造 `SessionRequest` → 新建 `PiPSession`
 2. `PiPSession` 同时持有 `CaptureEngine` 与 `PiPWindowController`，两者互不引用
-3. 帧：`SCStream` → 捕获串行队列 → `FrameGate.accept`（只放行 `.complete`）→ `IdleDetector.feed` → 主线程 → `AVSampleBufferDisplayLayer.enqueue`
+3. 帧：`SCStream` → 捕获串行队列 → `FrameGate.accept`（只放行 `.complete`）→ `IdleDetector.feed` → 主线程 → `sampleBufferRenderer.enqueue`
 4. 交互：视图手势 → `PiPWindowDelegate` → 改 `PiPSessionState` → `Geo.sourceRect` 算裁剪 → `CaptureEngine.retune`
 
 ## 关键约定
@@ -30,6 +30,11 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 - **缩放不重建流**：改的是 `SCStreamConfiguration.sourceRect` + `width/height`，通过 `updateConfiguration` 下发；`CaptureEngine.restart()` 只作为兜底。
 - **帧回调不碰 UI**：回调在 `com.ljzxzxl.mywindowpip.capture` 串行队列，任何 UI 操作都要 `DispatchQueue.main.async`。
 - **不跨帧持有 `CMSampleBuffer`**，`queueDepth = 3`，宁丢帧不积压。
+- **捕获健康与渲染健康分开监控**：`CaptureEngine` 的 watchdog 只判断 SCK 是否持续产帧；`RendererStallMonitor` 判断 renderer 是否持续接收帧。短暂 not-ready 正常丢帧，连续 2 秒则按 `flush → 重建 display layer → 重启捕获流` 分级恢复。macOS 14+ 只通过 `AVSampleBufferDisplayLayer.sampleBufferRenderer` 查询状态、enqueue 和 flush，不要混用 display layer 上已废弃的旧队列 API。
+- **流不连续必须重置 renderer 时间线**：pause/resume、restart、源窗口重匹配、输出像素尺寸变化或 PTS 回退时，先 flush 旧队列并保留最后画面；普通平移/缩放且输出格式不变时不要无条件 flush，以免闪烁。
+- **renderer 诊断只在事故时落盘**：每个会话用 `RendererDiagnostics` 在内存保留最近 64 条生命周期事件；确认卡流后生成 `R-XXXXXXXX` 编号并把现场快照写入 `~/Library/Logs/MyWindowPip/MyWindowPip.log`。普通 retune/帧状态不要逐条写 Release 日志；日志最多 2 MB + 一个 previous 文件，不得记录画面像素或上传。
+- **只有 warn / error 落盘**：`Log.info` 里带着窗口标题（「新建窗口 PiP：<标题>」），正常使用不该把它留在磁盘上，所以 info / debug 只进控制台。事故快照本身是 `Log.warn`，排障能力不减。落盘走专用串行队列 `com.ljzxzxl.mywindowpip.log`——帧回调也会打日志，磁盘 I/O 不能占着锁卡住捕获队列或主线程。
+- **自愈重启必须有上限**：`renderer 自愈耗尽 → restartCapture → captureWillRestart → prepareForCaptureDiscontinuity → stallMonitor.reset()` 是一条能自我循环的链，renderer 永久损坏时会无限重建 SCStream。`PiPSession` 用「90 秒内最多 2 次」限流，超限只打 `Log.error` 并提示用户关闭重开；恢复成功时经 `pipRendererDidRecover()` 清零。
 - **防镜中镜**：浮窗 `sharingType = .none`；窗口枚举过滤自身 App；区域捕获的显示器过滤器按 App 排除自己。
 - **零权限优先**：任何功能都必须能在「只有屏幕录制权限」的前提下通过控制条或右键菜单完成；辅助功能权限只允许作为增强项。
 - **不用系统 tooltip**：浮窗 level 是 `.screenSaver`(1000)，系统 tooltip 窗口层级更低会被压在浮窗后面，而且初始延迟不可调。所有浮窗内的提示统一走 `PiPWindowController.showHint(_:near:duration:)`，它用一个 `addChildWindow` 挂在浮窗上的**子窗口**承载（这样才能画到浮窗顶边之外、显示在图标上方），子窗口必须 `ignoresMouseEvents = true`。新增按钮时把提示文案登记到 `OverlayControlsView` 的 hint 映射里，不要再写 `toolTip`。
@@ -47,6 +52,7 @@ App 层    main.swift · AppDelegate · StatusBarController · SettingsWindowCon
 
 ```bash
 bash scripts/build-app.sh --fast --debug     # 开发期快速构建（单架构 + 日志 + 自检断言）
+swift test                                  # renderer 卡流与自愈状态机测试（需完整 Xcode，仅 CLT 会报 no such module 'XCTest'）
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --selftest              # 权限与捕获链路自检
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke 10              # 自动开一路 PiP 跑 10 秒再退出
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke 60 --smoke-sessions 4   # 多路并发压测
@@ -55,12 +61,15 @@ bash scripts/build-app.sh --fast --debug     # 开发期快速构建（单架构
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-onboarding      # 首启引导浮层回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-activate        # 精确回源窗口 + 标题按需刷新回归
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-mc              # 调度中心几何污染回归（会开合调度中心）
+./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-renderer        # renderer 卡流状态机 + 计划性 flush 后仍能入队
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update          # 更新链路回归（真实下载 + SHA256 校验）
 bash scripts/reset-permission.sh             # 重建后重置 TCC 记录
 ```
 
 > `--smoke-autohide` 与 `--smoke-bar` 会用 `CGWarpMouseCursorPosition` 短暂移动鼠标指针，
 > 这是为了走真实的 `HoverMonitor` 轮询路径，跑完自动退出。
+
+**两套编译路径分工**：`scripts/build-app.sh` 用 `swiftc` 直编（只装 Command Line Tools 的机器也能构建、能发版，是唯一的发布路径）；`Package.swift` 的 `MyWindowPipTests` 走 SwiftPM，只用来跑纯逻辑单测，**需要完整 Xcode**（XCTest 不随 CLT 提供），因此只挂在 `ci.yml`，不进 `release.yml`。新增源文件两边都会自动纳入（`Sources/my-window-pip/*.swift` 通配 + SwiftPM 目录约定），但新增编译选项或依赖要两处同步。跑不了 `swift test` 的机器用 `--smoke-renderer` 覆盖同一批状态机断言。
 
 只想类型检查某几个文件（不连编整个 App）：
 
@@ -128,6 +137,9 @@ codesign -d -r- build/MyWindowPip.app 2>&1 | grep 'designated =>'   # 不应出�
 ## 排查提示
 
 - 浮窗一片黑：先跑 `--selftest`。若权限正常但收不到帧，多半是源窗口最小化（系统不产帧）或流被 `FrameGate` 全过滤（画面完全静止）。
+- 浮窗停在旧画面但源窗口仍在变化：恢复后会出现带 `R-XXXXXXXX` 的一次性提示；保存 `~/Library/Logs/MyWindowPip/MyWindowPip.log`（以及同目录的 `MyWindowPip.previous.log`）。搜索该编号可看到卡住前最近 64 条会话事件、retune 请求、PTS/像素尺寸、renderer 状态和分级恢复结果。不要只看 `CaptureEngine` 是否收帧——历史故障正是捕获持续正常、单个 renderer 却永久 not-ready。
+- 提示「画面无法自动恢复，请关闭浮窗后重开」：说明 90 秒内已经重启过 2 次捕获流仍未恢复，限流生效、不再自动重启。日志里搜 `renderer 自愈已达上限` 能拿到前几轮的事故编号。
+- 实时观察本地日志：`tail -f ~/Library/Logs/MyWindowPip/MyWindowPip.log`。只有 warn/error 与事故快照会落到这里（含窗口标题等运行元数据，不含任何画面像素、不上传）；想看逐帧细节用 `--debug` 构建看控制台输出。分享日志前按需脱敏。
 - 改帧率没反应：确认 `IdleDetector` 没把它压到 1 fps（`--debug` 日志里有「静止检测」记录）。
 - 热键没反应：`HotkeyManager.failedActions` 非空说明被别的应用占用，设置页会提示；`fn` 组合键必须开增强模式。
 - 增强模式突然失灵：系统会在负载高时禁用事件监听，`EventTapManager` 已监听 `tapDisabledByTimeout` 自动恢复，日志里能看到告警。
