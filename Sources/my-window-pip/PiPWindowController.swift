@@ -64,8 +64,9 @@ private final class PiPRootView: NSView {
 
 /// 提示条内容视图（自绘背景 + 文字），由 `PiPWindowController` 放进一个跟随浮窗的子窗口里。
 ///
-/// 为什么不用系统 tooltip：浮窗 level 为 `.screenSaver`(1000)，而系统 tooltip 是层级更低的独立窗口，
-/// 会被压在浮窗后面只露出窗外的一小截；它的初始延迟也由 `NSToolTipManager` 私有控制，无法调整。
+/// 为什么不用系统 tooltip：浮窗层级（全局悬浮档 `WindowLevelMode.globalLevel` = 100）高于系统 tooltip
+/// 所在的普通窗口层级，tooltip 会被压在浮窗后面只露出窗外的一小截；
+/// 它的初始延迟也由 `NSToolTipManager` 私有控制，无法调整。
 ///
 /// 为什么不用 `NSTextField`：`NSTextField` 的 cell 自身还有约 2pt 的左右内边距，
 /// 按 `NSString.size(withAttributes:)` 算出的宽度总会比 cell 实际需要的少 4pt 左右，
@@ -669,6 +670,10 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     /// 仅用于 `--smoke-renderer`
     var debugEnqueuedFrameCount: UInt64 { contentView.debugEnqueuedFrameCount }
     var debugNotReadyDropCount: UInt64 { contentView.debugNotReadyDropCount }
+
+    /// 仅用于 `--smoke-level`
+    var debugWindowLevel: Int { panel.level.rawValue }
+    var debugHintWindowLevel: Int { hintWindow.level.rawValue }
 
     // MARK: - 状态同步
 
