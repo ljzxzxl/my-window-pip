@@ -121,6 +121,23 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     var isHidden: Bool { state.isHidden }
     var isPaused: Bool { state.isPaused }
     var windowFrame: CGRect { windowController.window.frame }
+    /// 只有当前 Space 中实际可见的 PiP 才能成为磁吸目标。
+    /// `isVisible` 排除已 orderOut 的窗口，`occlusionState` 进一步排除非活动 Space
+    /// 或被完全遮挡的窗口；直接读取 AppKit 实时状态，避免另存一份容易过期的可见性缓存。
+    var isVisibleForSnapping: Bool {
+        let window = windowController.window
+        return Self.canParticipateInSnapping(
+            isHidden: state.isHidden,
+            isWindowVisible: window.isVisible,
+            isOcclusionVisible: window.occlusionState.contains(.visible)
+        )
+    }
+
+    /// 磁吸候选的纯策略，独立于 NSWindow 生命周期，便于对 Space / orderOut 边界做确定性测试。
+    static func canParticipateInSnapping(isHidden: Bool, isWindowVisible: Bool,
+                                          isOcclusionVisible: Bool) -> Bool {
+        !isHidden && isWindowVisible && isOcclusionVisible
+    }
 
     func bringToFront() { windowController.bringToFront() }
     func flashHighlight() { windowController.flashHighlight() }

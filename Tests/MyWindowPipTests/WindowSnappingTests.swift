@@ -4,6 +4,29 @@ import XCTest
 
 final class WindowSnappingTests: XCTestCase {
 
+    func testSnapCandidateMustBeActuallyVisibleOnCurrentSpace() {
+        XCTAssertTrue(PiPSession.canParticipateInSnapping(
+            isHidden: false,
+            isWindowVisible: true,
+            isOcclusionVisible: true
+        ))
+        XCTAssertFalse(PiPSession.canParticipateInSnapping(
+            isHidden: true,
+            isWindowVisible: true,
+            isOcclusionVisible: true
+        ))
+        XCTAssertFalse(PiPSession.canParticipateInSnapping(
+            isHidden: false,
+            isWindowVisible: false,
+            isOcclusionVisible: true
+        ))
+        XCTAssertFalse(PiPSession.canParticipateInSnapping(
+            isHidden: false,
+            isWindowVisible: true,
+            isOcclusionVisible: false
+        ))
+    }
+
     func testScreenEdgeSnappingSupportsNegativeDisplayCoordinatesAndPreservesSize() {
         let visibleFrame = CGRect(x: -1200, y: -100, width: 1200, height: 900)
         let proposed = CGRect(x: -311, y: 200, width: 300, height: 180)

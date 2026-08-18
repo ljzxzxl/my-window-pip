@@ -198,9 +198,10 @@ final class SessionStore {
               let screen = targetScreen(for: proposed) else { return proposed }
         let visibleFrame = screen.visibleFrame
         let siblings = sessions.compactMap { session -> CGRect? in
-            guard session !== moving, !session.isHidden else { return nil }
+            guard session !== moving, session.isVisibleForSnapping else { return nil }
             let frame = session.windowFrame
-            // 只让「主要位于同一显示器」的 PiP 参与磁吸；跨屏窗口只露过来一点不算。
+            // 只让「当前 Space 实际可见且主要位于同一显示器」的 PiP 参与磁吸；
+            // 跨屏窗口只露过来一点不算，非活动 Space 的旧 frame 也不会产生幽灵吸附。
             guard let siblingScreen = targetScreen(for: frame),
                   isSameDisplay(siblingScreen, screen) else { return nil }
             return frame
