@@ -75,6 +75,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             title: request.source.displayTitle,
             aspect: request.sourcePointSize,
             initialWidth: width,
+            origin: prefs.origin(for: request.source.preferenceKey),
             levelMode: prefs.windowLevelMode,
             cascadeIndex: cascadeIndex
         )
@@ -107,7 +108,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         hiddenAutoCloseTimer?.invalidate()
         HoverMonitor.shared.unregister(id: id)
         engine.stop()
-        persistPreferredWidth()
+        persistGeometry()
         windowController.close()
         Log.info("会话关闭：\(state.source.displayTitle)")
         onClose?(self)
@@ -761,9 +762,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         retune(reason: "屏幕参数变化")
     }
 
-    private func persistPreferredWidth() {
+    private func persistGeometry() {
         let key = state.source.preferenceKey
         Preferences.shared.setPreferredWidth(windowController.contentPointSize.width, for: key)
+        Preferences.shared.setOrigin(windowController.frameOrigin, for: key)
     }
 
     // MARK: - PiPWindowDelegate
@@ -914,5 +916,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func pipResolveDragFrame(_ proposedFrame: CGRect,
                              modifierFlags: NSEvent.ModifierFlags) -> CGRect {
         onResolveDragFrame?(proposedFrame, modifierFlags) ?? proposedFrame
+    }
+
+    func pipDidMove() {
+        Preferences.shared.setOrigin(windowController.frameOrigin, for: state.source.preferenceKey)
     }
 }

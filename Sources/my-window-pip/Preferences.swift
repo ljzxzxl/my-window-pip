@@ -84,6 +84,7 @@ final class Preferences {
     private enum K {
         static let fpsByApp = "fpsByApp"
         static let widthByApp = "widthByApp"
+        static let originByApp = "originByApp"
         static let hotkeyPiP = "hotkey.pip"
         static let hotkeyRegion = "hotkey.region"
         static let hotkeyCloseAll = "hotkey.closeAll"
@@ -253,6 +254,18 @@ final class Preferences {
         var dict = (d.dictionary(forKey: K.widthByApp) as? [String: Double]) ?? [:]
         dict[prefKey] = Double(width)
         d.set(dict, forKey: K.widthByApp)
+    }
+
+    func origin(for prefKey: String) -> CGPoint? {
+        guard let dict = d.dictionary(forKey: K.originByApp) as? [String: [Double]],
+              let v = dict[prefKey], v.count == 2 else { return nil }
+        return CGPoint(x: v[0], y: v[1])
+    }
+
+    func setOrigin(_ origin: CGPoint, for prefKey: String) {
+        var dict = (d.dictionary(forKey: K.originByApp) as? [String: [Double]]) ?? [:]
+        dict[prefKey] = [Double(origin.x), Double(origin.y)]
+        d.set(dict, forKey: K.originByApp)
     }
 
     /// 终端/日志/编辑器类应用的关键字，命中则首次默认 5 fps。

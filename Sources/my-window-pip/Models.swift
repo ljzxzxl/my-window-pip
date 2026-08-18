@@ -11,7 +11,7 @@ enum CaptureSource: Equatable {
     /// 屏幕区域。`rect` 为 AppKit 全局坐标（左下原点，逻辑点）。
     case region(displayID: CGDirectDisplayID, rect: CGRect)
 
-    /// per-app 偏好（帧率 / 宽度）使用的存储键。位置不按 App 持久化。
+    /// per-app 偏好（帧率 / 宽度 / 位置）使用的存储键。
     var preferenceKey: String {
         switch self {
         case let .window(_, bundleID, appName, _): return bundleID ?? "app:\(appName)"
@@ -207,4 +207,5 @@ protocol PiPWindowDelegate: AnyObject {
     /// 拖动窗口时请求上层根据屏幕与其他 PiP 修正位置（尺寸由窗口层保持不变）
     func pipResolveDragFrame(_ proposedFrame: CGRect,
                              modifierFlags: NSEvent.ModifierFlags) -> CGRect
+    func pipDidMove()
 }

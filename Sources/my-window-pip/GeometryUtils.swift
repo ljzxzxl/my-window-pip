@@ -217,7 +217,7 @@ enum Geo {
         in visibleFrame: CGRect,
         siblings: [CGRect],
         threshold: CGFloat = 12,
-        gap: CGFloat = 8,
+        gap: CGFloat = 0,
         edgeInset: CGFloat = 12
     ) -> CGRect {
         guard proposed.width > 0, proposed.height > 0,
@@ -341,12 +341,12 @@ enum Geo {
         assert(abs(snappedRight.maxX - 988) < 0.001, "应吸附到屏幕右边 12pt 内缩")
         assert(snappedRight.size == nearRight.size, "磁吸不应改变窗口尺寸")
 
-        // 相邻窗口：右边对齐，并在上方保留 8pt 间距
+        // 相邻窗口：右边对齐，上下边缘无间隙贴合
         let sibling = CGRect(x: 700, y: 300, width: 200, height: 100)
         let nearAbove = CGRect(x: 702, y: 403, width: 200, height: 100)
         let snappedAbove = snappedWindowFrame(nearAbove, in: visible, siblings: [sibling])
         assert(abs(snappedAbove.maxX - sibling.maxX) < 0.001, "相邻浮窗应能右边对齐")
-        assert(abs(snappedAbove.minY - 408) < 0.001, "上下相邻浮窗应保留 8pt 间距")
+        assert(abs(snappedAbove.minY - sibling.maxY) < 0.001, "上下相邻浮窗应无间隙贴合")
 
         // 超过阈值不磁吸；垂直方向遥远的窗口也不应影响 X 对齐
         let free = CGRect(x: 650, y: 650, width: 200, height: 100)

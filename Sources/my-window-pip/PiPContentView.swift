@@ -31,7 +31,7 @@ final class PiPContentView: NSView {
     var onRendererRecoveryExhausted: (() -> Void)?
     /// renderer 卡流恢复后，controller 用它显示一次非阻塞提示。
     var onRendererIncidentRecovered: ((String) -> Void)?
-    /// 手动拖动窗口结束（本次按下确实移动过窗口）：上层据此确认跨屏 scale 变化
+    /// 手动拖动窗口结束（本次按下确实移动过窗口）：上层据此持久化位置、确认跨屏 scale 变化
     var onDidDragWindow: (() -> Void)?
     /// 干净的单击（未拖动、`clickCount == 1`、无 Cmd/⌥/⌃/⇧）：请求切回源应用
     var onRequestActivateSource: (() -> Void)?
