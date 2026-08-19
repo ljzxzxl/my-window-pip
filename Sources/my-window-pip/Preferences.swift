@@ -78,13 +78,17 @@ enum KeyCodeNames {
 
 /// UserDefaults 封装。所有偏好读写唯一入口。
 final class Preferences {
-    static let shared = Preferences()
-    private let d = UserDefaults.standard
+    static let shared = Preferences(defaults: .standard)
+    private let d: UserDefaults
+    private let now: () -> TimeInterval
 
     private enum K {
         static let fpsByApp = "fpsByApp"
         static let widthByApp = "widthByApp"
+        // 历史键名沿用以兼容旧版本；现在同时保存回退位置与捕获目标的精确位置。
         static let originByApp = "originByApp"
+        // 同样沿用首版开发键名；实际覆盖整窗和区域捕获的精确位置。
+        static let windowOriginLastUsed = "windowOriginLastUsed"
         static let hotkeyPiP = "hotkey.pip"
         static let hotkeyRegion = "hotkey.region"
         static let hotkeyCloseAll = "hotkey.closeAll"
@@ -100,7 +104,11 @@ final class Preferences {
         static let clickToActivateSource = "clickToActivateSource"
     }
 
-    private init() {
+    /// 注入 defaults 与时钟，生产环境使用标准域；测试使用独立 suite，避免污染用户偏好。
+    init(defaults: UserDefaults = .standard,
+         now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 }) {
+        d = defaults
+        self.now = now
         d.register(defaults: [
             K.defaultFPS: FPSStep.fifteen.rawValue,
             K.autoHideDefault: false,
@@ -256,16 +264,59 @@ final class Preferences {
         d.set(dict, forKey: K.widthByApp)
     }
 
-    func origin(for prefKey: String) -> CGPoint? {
+    func origin(for identity: PositionMemoryIdentity) -> CGPoint? {
+        storedOrigin(for: identity.preferenceKey, touch: true)
+    }
+
+    func fallbackOrigin(for identity: PositionMemoryIdentity) -> CGPoint? {
+        storedOrigin(for: identity.fallbackPreferenceKey, touch: false)
+    }
+
+    private func storedOrigin(for prefKey: String, touch: Bool) -> CGPoint? {
         guard let dict = d.dictionary(forKey: K.originByApp) as? [String: [Double]],
               let v = dict[prefKey], v.count == 2 else { return nil }
+        if touch { touchPositionOriginIfNeeded(prefKey) }
         return CGPoint(x: v[0], y: v[1])
     }
 
-    func setOrigin(_ origin: CGPoint, for prefKey: String) {
+    /// 一次读改写同时保存精确位置和旧版兼容回退，避免两个独立写入之间留下半更新状态。
+    func setOrigin(_ origin: CGPoint, for identity: PositionMemoryIdentity) {
         var dict = (d.dictionary(forKey: K.originByApp) as? [String: [Double]]) ?? [:]
-        dict[prefKey] = [Double(origin.x), Double(origin.y)]
+        let value = [Double(origin.x), Double(origin.y)]
+        dict[identity.preferenceKey] = value
+        dict[identity.fallbackPreferenceKey] = value
+        if PositionMemoryIdentity.isSpecificPreferenceKey(identity.preferenceKey) {
+            var lastUsed = (d.dictionary(forKey: K.windowOriginLastUsed) as? [String: Double]) ?? [:]
+            lastUsed[identity.preferenceKey] = now()
+            prunePositionOrigins(&dict, lastUsed: &lastUsed)
+            d.set(lastUsed, forKey: K.windowOriginLastUsed)
+        }
         d.set(dict, forKey: K.originByApp)
+    }
+
+    /// 捕获目标可能不断变化；只保留最近使用的记录，避免长期使用后 UserDefaults 膨胀。
+    private static let maxRememberedPositionOrigins = 128
+
+    private func touchPositionOriginIfNeeded(_ key: String) {
+        guard PositionMemoryIdentity.isSpecificPreferenceKey(key) else { return }
+        var lastUsed = (d.dictionary(forKey: K.windowOriginLastUsed) as? [String: Double]) ?? [:]
+        lastUsed[key] = now()
+        d.set(lastUsed, forKey: K.windowOriginLastUsed)
+    }
+
+    private func prunePositionOrigins(_ origins: inout [String: [Double]],
+                                      lastUsed: inout [String: Double]) {
+        let positionKeys = origins.keys.filter {
+            PositionMemoryIdentity.isSpecificPreferenceKey($0)
+        }
+        guard positionKeys.count > Self.maxRememberedPositionOrigins else { return }
+        let stale = positionKeys.sorted {
+            (lastUsed[$0] ?? 0) < (lastUsed[$1] ?? 0)
+        }.prefix(positionKeys.count - Self.maxRememberedPositionOrigins)
+        for key in stale {
+            origins.removeValue(forKey: key)
+            lastUsed.removeValue(forKey: key)
+        }
     }
 
     /// 终端/日志/编辑器类应用的关键字，命中则首次默认 5 fps。
