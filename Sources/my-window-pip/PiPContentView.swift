@@ -15,8 +15,10 @@ final class PiPContentView: NSView {
 
     // MARK: - 对外回调
 
-    /// 请求缩放：(新倍率, 新锚点 —— 源画面归一化坐标，左上原点)
+    /// 请求缩放：(新倍率, 新锚点 —— 当前裁剪基准的归一化坐标，左上原点)
     var onRequestZoom: ((CGFloat, CGPoint) -> Void)?
+    /// Cmd 框选完成：当前可见画面内的归一化区域（左上原点）。
+    var onRequestSelection: ((CGRect) -> Void)?
     /// 请求平移：归一化视野位移（相对当前可见视野的比例，正值 = 视野向右/向下移动）
     var onRequestPan: ((CGSize) -> Void)?
     var onRequestZoomReset: (() -> Void)?
@@ -36,6 +38,8 @@ final class PiPContentView: NSView {
     // MARK: - 渲染
 
     private var displayLayer: AVSampleBufferDisplayLayer
+    /// 最近一帧 SCK 元数据描述的有效 IOSurface 区域。nil 时按完整 buffer 展示。
+    private var contentGeometry: FrameGate.ContentGeometry?
     /// Cmd + 拖拽的框选提示层
     private let selectionLayer = CAShapeLayer()
     /// display layer 进入 failed 状态时只打一次日志，避免刷屏
@@ -131,7 +135,7 @@ final class PiPContentView: NSView {
     override func layout() {
         super.layout()
         attachLayersIfNeeded()
-        displayLayer.frame = bounds
+        layoutDisplayLayer()
         selectionLayer.frame = bounds
     }
 
@@ -154,9 +158,43 @@ final class PiPContentView: NSView {
 
     private static func makeDisplayLayer() -> AVSampleBufferDisplayLayer {
         let layer = AVSampleBufferDisplayLayer()
-        layer.videoGravity = .resizeAspect
+        // 具体 aspect/padding 已由 SCStream 配置和逐帧 contentRect 处理；这里不要再次 letterbox。
+        layer.videoGravity = .resize
         layer.backgroundColor = NSColor.black.cgColor
         return layer
+    }
+
+    private func layoutDisplayLayer() {
+        let targetFrame: CGRect
+        if let geometry = contentGeometry,
+           let cropped = Geo.displayLayerFrame(
+               bufferSize: geometry.bufferSize,
+               visibleRectPixels: geometry.visibleRectPixels,
+               in: bounds
+           ) {
+            targetFrame = cropped
+        } else {
+            targetFrame = bounds
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        displayLayer.frame = targetFrame
+        CATransaction.commit()
+    }
+
+    private func updateContentGeometry(from sampleBuffer: CMSampleBuffer, at now: TimeInterval) {
+        guard let newGeometry = FrameGate.contentGeometry(sampleBuffer) else { return }
+        guard contentGeometry != newGeometry else { return }
+        contentGeometry = newGeometry
+        if newGeometry.hasPadding {
+            let v = newGeometry.visibleRectPixels
+            diagnostics.record(
+                "frame.content-padding buffer=\(Int(newGeometry.bufferSize.width))x\(Int(newGeometry.bufferSize.height)) "
+                    + "visible=\(Int(v.minX)),\(Int(v.minY)),\(Int(v.width))x\(Int(v.height))",
+                at: now
+            )
+        }
+        layoutDisplayLayer()
     }
 
     // MARK: - 状态注入
@@ -198,6 +236,7 @@ final class PiPContentView: NSView {
         let now = ProcessInfo.processInfo.systemUptime
         incomingFrameCount &+= 1
         lastIncomingUptime = now
+        updateContentGeometry(from: sampleBuffer, at: now)
         let renderer = displayLayer.sampleBufferRenderer
         recordRendererTransition(renderer, at: now)
 
@@ -294,6 +333,8 @@ final class PiPContentView: NSView {
         stallMonitor.reset()
         lastIncomingPTS = nil
         lastPixelSize = nil
+        contentGeometry = nil
+        layoutDisplayLayer()
         lastRendererStateSignature = nil
         cancelSelection()
         resetDragTracking()
@@ -385,9 +426,9 @@ final class PiPContentView: NSView {
         old.removeFromSuperlayer()
 
         let replacement = Self.makeDisplayLayer()
-        replacement.frame = bounds
         replacement.contentsScale = window?.backingScaleFactor ?? 2
         displayLayer = replacement
+        layoutDisplayLayer()
 
         if let root = layer {
             CATransaction.begin()
@@ -558,13 +599,19 @@ final class PiPContentView: NSView {
             let selection = Self.rect(from: start, to: convert(event.locationInWindow, from: nil))
             cancelSelection()
 
-            guard let result = Geo.zoomAndAnchor(forSelection: selection, aspect: aspect, bounds: bounds,
-                                                 currentZoom: zoom, currentAnchor: anchor) else { return }
-            // 本地先行更新，避免连续操作时用到过期的 zoom/anchor
-            zoom = result.0
-            anchor = result.1
+            guard let normalized = Geo.visibleNormalizedRect(
+                forSelection: selection,
+                aspect: aspect,
+                bounds: bounds
+            ) else { return }
+            // 新语义：框选区域本身成为新的捕获基准，因此 PiP 可以切成该区域自己的宽高比。
+            // 上层会把 normalized 映射到当前 sourceRect；本地先复位 zoom/anchor，避免连续手势
+            // 在上层 update(state:) 回来前误用旧倍率。
+            zoom = PiPSessionState.minZoom
+            anchor = CGPoint(x: 0.5, y: 0.5)
             pendingZoom = nil
-            onRequestZoom?(result.0, result.1)
+            pendingPan = .zero
+            onRequestSelection?(normalized)
             return
         }
 

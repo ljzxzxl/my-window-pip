@@ -106,8 +106,10 @@ struct PiPSessionState {
     var source: CaptureSource
     /// 放大倍率，1.0…20.0
     var zoom: CGFloat = 1.0
-    /// 放大中心（源画面归一化坐标，左上原点，0…1）
+    /// 放大中心（当前裁剪基准的归一化坐标，左上原点，0…1）
     var anchor: CGPoint = CGPoint(x: 0.5, y: 0.5)
+    /// Cmd 框选是否已经把捕获基准切成任意宽高比的子区域。
+    var hasSelectionCrop: Bool = false
     var fps: FPSStep = .fifteen
     var autoHide: Bool = false
     var idleDetection: Bool = true
@@ -152,6 +154,10 @@ struct IdleVerdict {
 enum SessionRuntimeState: Equatable {
     case streaming
     case paused
+    /// 源窗口处于其它 Space 等非当前可见状态。保留最后一帧，不显示关闭占位。
+    case sourceOffscreen
+    /// AX 明确确认用户点击黄色按钮最小化。
+    case minimized
     /// 源窗口已最小化 / 暂时不可见，等待恢复
     case waitingForSource
     /// 正在重连（第 n 次）
@@ -186,11 +192,17 @@ protocol PiPWindowDelegate: AnyObject {
     var currentSessionState: PiPSessionState { get }
 
     func pipRequestClose()
-    /// 请求缩放到指定倍率与锚点（锚点为源画面归一化坐标，左上原点）
+    /// 请求缩放到指定倍率与锚点（锚点为当前裁剪基准的归一化坐标，左上原点）
     func pipRequestZoom(_ zoom: CGFloat, anchor: CGPoint)
+    /// Cmd 框选：矩形是“当前可见画面”内的归一化区域（左上原点，0…1）。
+    /// 上层把它映射成精确 sourceRect，并把 PiP 宽高比改成该区域比例。
+    func pipRequestSelection(_ normalizedRect: CGRect)
     /// 归一化平移增量（正值表示画面向右/向下移动视野）
     func pipRequestPan(by delta: CGSize)
     func pipRequestZoomReset()
+    /// 系统 live resize 生命周期：自动隐藏模式用它锁住鼠标命中，避免拖动中途重新 click-through。
+    func pipWillStartLiveResize()
+    func pipDidEndLiveResize()
     /// 窗口尺寸变化（已 debounce）：新的逻辑尺寸与所在屏幕的 backingScaleFactor
     func pipDidResize(pointSize: CGSize, scale: CGFloat)
     func pipRequestFPS(_ fps: FPSStep)

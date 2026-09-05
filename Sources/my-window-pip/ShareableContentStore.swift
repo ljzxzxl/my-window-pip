@@ -19,8 +19,9 @@ struct WindowGroup {
 /// 设计要点：
 /// - 单次查询要数十毫秒，菜单栏点开时必须立即有数据，因此做 1 秒 TTL 缓存；
 ///   过期时先返回旧值再触发后台刷新（getter 不阻塞）。
-/// - 缓存分三份：`candidates`（可作为 PiP 源，已过滤）、`all`（不含自身 App 的全部窗口，
-///   供按 ID 精确查找）、`own`（自身 App 的窗口，区域捕获时要排除，防止镜中镜）。
+/// - 枚举覆盖全部 Space；缓存分三份：`candidates`（可作为 PiP 源，已过滤）、`all`
+///   （不含自身 App 的全部窗口，供按 ID 精确查找）、`own`（自身 App 的窗口，区域捕获时
+///   要排除，防止镜中镜）。前台窗口入口再按实时 onscreen + WindowServer 层级收窄。
 /// - 对外语义是「主线程访问」；但 `cachedWindow(id:)` 属于高频路径，可能在捕获队列上被调用，
 ///   因此所有缓存读写都用一把锁保护，跨线程读取安全（读到的是某一时刻的快照）。
 ///
@@ -105,8 +106,10 @@ final class ShareableContentStore: @unchecked Sendable {
         // SCShareableContent 的查询是 async throws，包在 Task 里执行，结果切回主线程处理。
         Task {
             do {
+                // 菜单、按 ID 存活检查和断线恢复都必须能看到其它 Space / 最小化窗口。
+                // 是否位于当前前台只属于 `frontmostWindow` 的选择条件，不能在枚举源头过滤。
                 let content = try await SCShareableContent.excludingDesktopWindows(
-                    true, onScreenWindowsOnly: true
+                    true, onScreenWindowsOnly: false
                 )
                 let snapshot = ContentSnapshot(content)
                 DispatchQueue.main.async { self.finishRefresh(.success(snapshot)) }
@@ -176,7 +179,7 @@ final class ShareableContentStore: @unchecked Sendable {
 
     // MARK: - 查询接口
 
-    /// 前台 App 的主窗口：pid 匹配 + `windowLayer == 0` + 在屏 + 尺寸 > 80 + 面积最大。
+    /// 当前真正位于前台的主窗口：前台 App pid + WindowServer 前后顺序 + onscreen 普通层窗口。
     func frontmostWindow(completion: @escaping (SCWindow?) -> Void) {
         withFreshCache { [weak self] in
             completion(self?.frontmostWindowFromCache())
@@ -261,18 +264,49 @@ final class ShareableContentStore: @unchecked Sendable {
 
     private func frontmostWindowFromCache() -> SCWindow? {
         let windows = withLock { candidatesCache }
-        // 自身在前台（例如打开了设置窗口）时不按 pid 匹配，退化为「最前面的可捕获窗口」
-        var pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        if pid == Self.ownProcessID { pid = nil }
+        // WindowServer ID 按约定唯一；覆盖式构造仍可避免异常重复数据导致进程崩溃。
+        var byID: [CGWindowID: SCWindow] = [:]
+        for window in windows { byID[window.windowID] = window }
 
-        if let pid {
-            let matched = windows.filter { window in
-                guard let app = window.owningApplication, app.processID == pid else { return false }
-                return Self.isMainLike(window)
+        // 全 Space 枚举后不能再依赖 SCK 数组顺序。CGWindowList 给出当前 onscreen 窗口的
+        // 实时前后顺序，再按 windowID 映射回 SCWindow，保证快捷键只选当前可见窗口。
+        let orderedIDs = Self.orderedOnScreenWindowIDs()
+        let orderedOnScreen = (orderedIDs ?? []).compactMap { byID[$0] }
+            .filter(Self.hasMainWindowGeometry)
+
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if let pid = frontmostPID, pid != Self.ownProcessID {
+            let matched = orderedOnScreen.filter { $0.owningApplication?.processID == pid }
+            if !matched.isEmpty {
+                let screenSizes = NSScreen.screens.map { $0.frame.size }
+                // 全屏/最大化应用可能同时暴露多个 layer-0 surface，例如 Chrome 会有横跨全屏
+                // 但只有百来点高的辅助窗口。此时优先选覆盖屏幕主体且面积最大的窗口，确保
+                // 前台 PiP 捕获的是完整主窗口；普通多窗口场景仍保留 WindowServer z-order。
+                if let screenFilling = matched
+                    .filter({ Geo.isScreenFillingWindow(size: $0.frame.size, screenSizes: screenSizes) })
+                    .max(by: { Self.area($0) < Self.area($1) }) {
+                    return screenFilling
+                }
+                return matched[0]
             }
-            if let best = matched.max(by: { Self.area($0) < Self.area($1) }) { return best }
+            if orderedIDs == nil {
+                let fallbackMatched = windows.filter {
+                    $0.owningApplication?.processID == pid && Self.isMainLike($0)
+                }
+                let screenSizes = NSScreen.screens.map { $0.frame.size }
+                if let screenFilling = fallbackMatched
+                    .filter({ Geo.isScreenFillingWindow(size: $0.frame.size, screenSizes: screenSizes) })
+                    .max(by: { Self.area($0) < Self.area($1) }) {
+                    return screenFilling
+                }
+                return fallbackMatched.first
+            }
+            return nil
         }
-        // 兜底：SCShareableContent 的窗口按前后顺序返回，取第一个像主窗口的
+
+        // 自身在前台（例如状态栏菜单触发）时，退化为最前面的非自身可捕获窗口。
+        if let frontmost = orderedOnScreen.first { return frontmost }
+        guard orderedIDs == nil else { return nil }
         return windows.first(where: Self.isMainLike)
     }
 
@@ -323,21 +357,56 @@ final class ShareableContentStore: @unchecked Sendable {
         return false
     }
 
-    /// 是否可作为 PiP 源：尺寸够大，且不是「无标题的小浮层」。
+    /// 是否适合出现在窗口选择菜单。
+    /// 全 Space 枚举会带回后台代理和内部 surface；这里只保留用户可理解的普通窗口。
     private static func isCandidate(_ window: SCWindow) -> Bool {
+        guard window.windowLayer == 0,
+              let owner = window.owningApplication,
+              owner.processID > 0 else { return false }
+
+        let title = trimmedTitle(of: window)
+        guard let runningApp = NSRunningApplication(processIdentifier: owner.processID),
+              !runningApp.isTerminated,
+              !runningApp.isHidden else { return false }
+        switch runningApp.activationPolicy {
+        case .regular:
+            break
+        case .accessory:
+            guard window.isOnScreen, !title.isEmpty else { return false }
+        case .prohibited:
+            return false
+        @unknown default:
+            guard window.isOnScreen, !title.isEmpty else { return false }
+        }
+
         let frame = window.frame
         guard frame.width.isFinite, frame.height.isFinite else { return false }
         guard frame.width >= minWindowSide, frame.height >= minWindowSide else { return false }
-        if trimmedTitle(of: window).isEmpty, area(window) < minUntitledArea { return false }
+        if !window.isOnScreen, title.isEmpty { return false }
+        if title.isEmpty, area(window) < minUntitledArea { return false }
         return true
     }
 
     /// 像「App 主窗口」：普通层级 + 在屏 + 尺寸大于阈值。
     private static func isMainLike(_ window: SCWindow) -> Bool {
-        window.isOnScreen
-            && window.windowLayer == 0
+        window.isOnScreen && hasMainWindowGeometry(window)
+    }
+
+    /// 普通主窗口的稳定属性；是否在屏由调用方根据实时 WindowServer 信息判断。
+    private static func hasMainWindowGeometry(_ window: SCWindow) -> Bool {
+        window.windowLayer == 0
             && window.frame.width > minWindowSide
             && window.frame.height > minWindowSide
+    }
+
+    /// WindowServer 当前 onscreen 窗口的前后顺序（最前面的在前）。
+    private static func orderedOnScreenWindowIDs() -> [CGWindowID]? {
+        guard let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return nil }
+        return list.compactMap { info in
+            (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value
+        }
     }
 
     private static func area(_ window: SCWindow) -> CGFloat {

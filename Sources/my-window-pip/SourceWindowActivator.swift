@@ -56,6 +56,59 @@ enum SourceWindowActivator {
         return pid_t(number.int32Value)
     }
 
+    /// 生命周期探测：直接查 WindowServer + 进程身份，AX 只负责确认 minimized。
+    /// 调用方应放在低频 utility queue；本函数不会触发权限弹窗。
+    static func lifecycleObservation(
+        of windowID: CGWindowID,
+        expectedPID: pid_t?
+    ) -> SourceWindowObservation {
+        let info = windowInfo(of: windowID)
+        let actualPID = (info?[kCGWindowOwnerPID as String] as? NSNumber)
+            .map { pid_t($0.int32Value) }
+        let probePID = expectedPID ?? actualPID
+        let processAlive = probePID.map(processIsAlive)
+        let ownerPIDMatches: Bool? = {
+            guard let expectedPID, let actualPID else { return nil }
+            return expectedPID == actualPID
+        }()
+        let isOnScreen = (info?[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue
+        let axMinimized: Bool? = {
+            guard let actualPID,
+                  expectedPID == nil || expectedPID == actualPID else { return nil }
+            return minimizedState(of: windowID, pid: actualPID)
+        }()
+        return SourceWindowObservation(
+            cgWindowExists: info != nil,
+            processAlive: processAlive,
+            ownerPIDMatches: ownerPIDMatches,
+            isOnScreen: isOnScreen,
+            axMinimized: axMinimized
+        )
+    }
+
+    /// Returns AX minimized only when Accessibility can answer. No permission prompt.
+    static func minimizedState(of windowID: CGWindowID) -> Bool? {
+        guard let pid = ownerPID(of: windowID) else { return nil }
+        return minimizedState(of: windowID, pid: pid)
+    }
+
+    private static func minimizedState(of windowID: CGWindowID, pid: pid_t) -> Bool? {
+        guard Permissions.hasAccessibility else { return nil }
+        let app = appElement(pid)
+        guard let windows = windows(of: app),
+              let target = exactWindow(id: windowID, in: windows) else { return nil }
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(target, kAXMinimizedAttribute as CFString, &raw) == .success
+        else { return nil }
+        return raw as? Bool
+    }
+
+    private static func processIsAlive(_ pid: pid_t) -> Bool {
+        guard pid > 0 else { return false }
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+    }
+
     static func activate(windowID: CGWindowID, pid: pid_t, fallbackTitle: String) -> Result {
         guard let runningApp = NSRunningApplication(processIdentifier: pid) else {
             return .applicationNotFound

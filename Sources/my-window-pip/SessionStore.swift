@@ -60,6 +60,10 @@ final class SessionStore {
 
     /// 画中画指定窗口（菜单栏选窗路径）
     func pip(window: SCWindow) {
+        pip(window: window, checkCompatibility: true, checkSoftLimit: true)
+    }
+
+    private func pip(window: SCWindow, checkCompatibility: Bool, checkSoftLimit: Bool) {
         guard Permissions.ensureScreenRecording() else { return }
 
         // 去重：同一个窗口已经有浮窗了，就把它提到最前并高亮提示
@@ -68,12 +72,18 @@ final class SessionStore {
             existing.flashHighlight()
             return
         }
-        guard confirmIfOverLimit() else { return }
+        if checkSoftLimit, !confirmIfOverLimit() { return }
+        if checkCompatibility, handleCompatibilityIfNeeded(for: window) { return }
 
+        _ = createWindowSession(window)
+    }
+
+    @discardableResult
+    private func createWindowSession(_ window: SCWindow) -> PiPSession? {
         let store = ShareableContentStore.shared
         let source = store.captureSource(for: window)
         let size = window.frame.size
-        guard size.width > 1, size.height > 1 else { return }
+        guard size.width > 1, size.height > 1 else { return nil }
 
         let request = SessionRequest(
             source: source,
@@ -84,8 +94,98 @@ final class SessionStore {
             autoHide: Preferences.shared.autoHideDefault,
             idleDetection: Preferences.shared.idleDetectionDefault
         )
-        add(PiPSession(request: request, cascadeIndex: sessions.count))
+        let session = PiPSession(request: request, cascadeIndex: sessions.count)
+        add(session)
         Log.info("新建窗口 PiP：\(source.displayTitle) @ \(request.fps.label)")
+        return session
+    }
+
+    /// 对已验证会在 inactive Space 停止 repaint 的 Chromium / Electron 源应用提供兼容重启。
+    /// 返回 true 表示本次创建已被重启流程或用户取消接管；false 表示继续正常创建 PiP。
+    private func handleCompatibilityIfNeeded(for window: SCWindow) -> Bool {
+        guard let owner = window.owningApplication,
+              let application = NSRunningApplication(processIdentifier: owner.processID),
+              let profile = SourceAppCompatibility.profile(for: application),
+              !SourceAppCompatibility.isKnownCompatibilityLaunch(
+                  profile, pid: application.processIdentifier
+              ) else { return false }
+
+        switch Preferences.shared.chromiumCompatibilityMode {
+        case .off:
+            return false
+        case .automatic:
+            startCompatibilityRelaunch(application: application, profile: profile)
+            return true
+        case .ask:
+            break
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L.t(
+            "\(profile.appName) 可能需要 Chromium 兼容模式",
+            "\(profile.appName) may need Chromium compatibility mode"
+        )
+        alert.informativeText = profile.isVerified
+            ? L.t(
+                "MyWindowPip 已实际验证：以 Chromium 兼容模式重新启动 \(profile.appName) 后，可以继续捕获其他 Space 中的实时更新。重启会关闭当前 \(profile.appName) 进程和该应用已有的 PiP；重启完成后不会自动重新创建 PiP，请先确认没有未保存的工作。",
+                "MyWindowPip has verified that relaunching \(profile.appName) in Chromium compatibility mode keeps live updates capturable on other Spaces. Relaunching will quit the current \(profile.appName) process and close its existing PiP windows; PiP will not be recreated automatically. Save any unfinished work first."
+            )
+            : L.t(
+                "检测到 \(profile.appName) 使用 Chromium / Electron runtime。兼容模式会用已知的 Chromium 后台绘制开关重新启动它，以避免其他 Space 中停止刷新。重启会关闭当前进程及该应用已有的 PiP，完成后不会自动重新创建，请先确认没有未保存的工作。",
+                "\(profile.appName) appears to use a Chromium / Electron runtime. Compatibility mode relaunches it with the known Chromium background-rendering switch so it can keep repainting on other Spaces. Existing PiP windows for the app are closed and are not recreated automatically. Save any unfinished work first."
+            )
+        alert.addButton(withTitle: L.t("以 Chromium 兼容模式重启", "Relaunch in Chromium Compatibility Mode"))
+        alert.addButton(withTitle: L.t("直接创建 PiP", "Create PiP Anyway"))
+        alert.addButton(withTitle: L.t("取消", "Cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            startCompatibilityRelaunch(application: application, profile: profile)
+            return true
+        case .alertSecondButtonReturn:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func startCompatibilityRelaunch(
+        application: NSRunningApplication,
+        profile: SourceAppCompatibility.Profile
+    ) {
+        // 源应用重启会让旧 windowID 全部失效；与其在源应用恢复时自动把 PiP 接回并挡住
+        // 新窗口左上角，不如在重启前主动关闭该应用的窗口 PiP。重启成功后由用户按需重新创建。
+        closeWindowSessions(bundleID: profile.bundleID)
+        Log.info("以 Chromium 兼容模式重启源应用；已关闭现有 PiP：\(profile.appName)")
+
+        SourceAppCompatibility.restart(application: application, profile: profile) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case let .success(relaunched):
+                self.notify(
+                    title: L.t("Chromium 兼容模式已启用", "Chromium compatibility mode is active"),
+                    message: L.t(
+                        "\(profile.appName) 已重新启动（PID \(relaunched.processIdentifier)）。需要时请重新创建 PiP。",
+                        "\(profile.appName) relaunched (PID \(relaunched.processIdentifier)). Create a new PiP when you need it."
+                    )
+                )
+            case let .failure(error):
+                self.notify(
+                    title: L.t("Chromium 兼容模式重启失败", "Chromium compatibility relaunch failed"),
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func closeWindowSessions(bundleID: String) {
+        let matching = sessions.filter { session in
+            guard case let .window(_, sessionBundleID, _, _) = session.state.source else { return false }
+            return sessionBundleID == bundleID
+        }
+        matching.forEach { $0.close() }
     }
 
     /// 区域捕获（热键 / 菜单入口）
