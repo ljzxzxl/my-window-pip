@@ -76,6 +76,21 @@ enum KeyCodeNames {
     }
 }
 
+/// Chromium / Electron 源应用的已验证离屏渲染兼容策略。
+enum ChromiumCompatibilityMode: String, CaseIterable {
+    case ask
+    case automatic
+    case off
+
+    var label: String {
+        switch self {
+        case .ask: return L.t("询问", "Ask")
+        case .automatic: return L.t("自动", "Automatic")
+        case .off: return L.t("关闭", "Off")
+        }
+    }
+}
+
 /// UserDefaults 封装。所有偏好读写唯一入口。
 final class Preferences {
     static let shared = Preferences()
@@ -98,6 +113,7 @@ final class Preferences {
         static let showsCursor = "showsCursor"
         static let hasSeenOnboarding = "hasSeenOnboarding"
         static let clickToActivateSource = "clickToActivateSource"
+        static let chromiumCompatibilityMode = "chromiumCompatibilityMode"
     }
 
     private init() {
@@ -111,6 +127,7 @@ final class Preferences {
             K.showsCursor: false,
             K.hasSeenOnboarding: false,
             K.clickToActivateSource: true,
+            K.chromiumCompatibilityMode: ChromiumCompatibilityMode.ask.rawValue,
         ])
     }
 
@@ -189,6 +206,16 @@ final class Preferences {
     var clickToActivateSource: Bool {
         get { d.bool(forKey: K.clickToActivateSource) }
         set { d.set(newValue, forKey: K.clickToActivateSource) }
+    }
+
+    /// 对已验证 Chromium / Electron 源应用的兼容重启策略。
+    var chromiumCompatibilityMode: ChromiumCompatibilityMode {
+        get {
+            ChromiumCompatibilityMode(
+                rawValue: d.string(forKey: K.chromiumCompatibilityMode) ?? ""
+            ) ?? .ask
+        }
+        set { d.set(newValue.rawValue, forKey: K.chromiumCompatibilityMode) }
     }
 
     // MARK: - 热键

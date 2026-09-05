@@ -116,6 +116,9 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         cfg.colorSpaceName = CGColorSpace.sRGB
         cfg.queueDepth = 3                                   // 低帧率下不需要大缓冲，省内存
         cfg.scalesToFit = true
+        // 始终保留源内容比例。SCK 可能把有效窗口内容放进更大的 IOSurface，
+        // 每帧的 contentRect × scaleFactor 才是有效像素区域；renderer 会据此裁掉 padding。
+        cfg.preservesAspectRatio = true
         cfg.showsCursor = showsCursor
         cfg.capturesAudio = false                            // v2 预留：音频跟随
         // 单窗口捕获默认会带上窗口阴影，浮窗里会显示成一圈半透明边，去掉更干净
@@ -319,7 +322,8 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     // MARK: - 卡流检测
 
     /// 内部定时器：超过 `max(2s, 3/fps)` 没收到有效帧就报一次 `captureDidStall()`（主线程）。
-    /// 源窗口最小化、所在 Space 不可见时 SCK 会停止产出 `.complete` 帧，靠这个感知。
+    /// SCK 可能因最小化、Space 切换或捕获链路暂时不可用而停止产出 `.complete` 帧；
+    /// 这里只报告 transport stall，窗口生命周期由 `PiPSession` 另行判断。
     private func startStallWatchdog() {
         stallLock.lock()
         lastFrameUptime = ProcessInfo.processInfo.systemUptime

@@ -12,6 +12,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     /// 捕获基准矩形（源坐标系、左上原点、逻辑点），缩放平移都在其内部进行
     private var baseRect: CGRect
+    /// Cmd 框选后固定下来的子区域；后续滚轮缩放/平移在这个区域内部继续工作。
+    /// resetZoom() 会清掉它并恢复完整 baseRect。
+    private var selectedBaseRect: CGRect? = nil
     private var sourcePixelSize: CGSize
 
     private let engine = CaptureEngine()
@@ -23,14 +26,22 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     // 运行期辅助状态
     private var isAutoHidden = false
-    /// 自动隐藏淡出后的「临时唤回」原因：按住 ⌥，或鼠标停在顶栏热区
-    private enum PeekReason { case option, bar }
+    /// 自动隐藏淡出后的「临时唤回」原因：按住 ⌥、按住 ⌘ 框选缩放、边缘 resize，或顶栏热区。
+    private enum PeekReason: Equatable { case option, commandZoom, resize, bar }
     private var peekReason: PeekReason?
     private var isPeeking: Bool { peekReason != nil }
+    /// AppKit live resize 期间锁住可交互状态；鼠标拖出原 frame 也不能重新变成 click-through。
+    private var isLiveResizing = false
     private var idleThrottled = false
     private var reconnectAttempt = 0
     private var reconnectWork: DispatchWorkItem?
     private var probeTimer: Timer?
+    /// 创建会话时记录的源 owner PID，用于防止 CGWindowID 被复用后误认成原窗口。
+    private var sourcePID: pid_t?
+    /// 生命周期查询可能包含同步 AX IPC；只允许低频后台探测，主线程只应用结果。
+    private var isSourceProbeInFlight = false
+    /// 离屏后最多主动 retarget/restart 一次；若 SCK 仍不供帧则冻帧等待，避免重启循环。
+    private var offscreenRetargetAttempted = false
     private var geometryRecheckWork: DispatchWorkItem?
     private var hiddenAutoCloseTimer: Timer?
     private var occlusionObserver: NSObjectProtocol?
@@ -45,6 +56,11 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     private static let hiddenAutoCloseSeconds: TimeInterval = 60
     private static let maxReconnectAttempts = 3
+    private static let sourceProbeQueue = DispatchQueue(
+        label: "com.ljzxzxl.mywindowpip.source-health",
+        qos: .utility,
+        attributes: .concurrent
+    )
     /// 恢复后再确认一次几何的延时（要大于 `ShareableContentStore` 的 1 秒 TTL）
     private static let geometryRecheckDelay: TimeInterval = 1.2
     /// 标题按需刷新的最小间隔：挡住悬停抖动与菜单反复开合
@@ -64,11 +80,16 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         )
         baseRect = request.baseSourceRect
         sourcePixelSize = request.sourcePixelSize
+        sourcePID = request.source.windowID.flatMap { SourceWindowActivator.ownerPID(of: $0) }
         idleDetector = IdleDetector()
 
         let prefs = Preferences.shared
-        let width = prefs.preferredWidth(for: request.source.preferenceKey)
-            ?? min(max(request.sourcePointSize.width / 2, 320), 640)
+        let width = Geo.initialPiPWidth(
+            sourceSize: request.sourcePointSize,
+            rememberedWidth: prefs.preferredWidth(for: request.source.preferenceKey),
+            screenSizes: NSScreen.screens.map { $0.frame.size },
+            isWindowSource: request.source.windowID != nil
+        )
         windowController = PiPWindowController(
             title: request.source.displayTitle,
             aspect: request.sourcePointSize,
@@ -209,9 +230,32 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         windowController.update(state: state)
     }
 
-    func resetZoom() {
+    /// Cmd 框选后，选区本身成为新的捕获基准，因此 PiP 也切换成选区宽高比。
+    /// normalizedRect 是当前可见 sourceRect 内的左上原点归一化矩形。
+    func applySelection(_ normalizedRect: CGRect) {
+        let visible = currentVisibleSourceRect()
+        guard visible.width > 1, visible.height > 1 else { return }
+        guard normalizedRect.width > 0.02, normalizedRect.height > 0.02,
+              let selected = Geo.sourceRect(
+                  fromNormalizedVisibleRect: normalizedRect,
+                  within: visible
+              ) else { return }
+
+        selectedBaseRect = selected
+        state.hasSelectionCrop = true
         state.zoom = 1
         state.anchor = CGPoint(x: 0.5, y: 0.5)
+        windowController.setAspect(selected.size)
+        retune(reason: "框选区域 \(Int(selected.width))×\(Int(selected.height))")
+        windowController.update(state: state)
+    }
+
+    func resetZoom() {
+        selectedBaseRect = nil
+        state.hasSelectionCrop = false
+        state.zoom = 1
+        state.anchor = CGPoint(x: 0.5, y: 0.5)
+        windowController.setAspect(baseRect.size)
         retune(reason: "重置画面缩放")
         windowController.update(state: state)
     }
@@ -243,9 +287,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             near: nil, duration: 3.0
         )
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            let modifiers = NSEvent.modifierFlags
             guard let self, !self.isClosed, self.state.autoHide, !self.state.isHidden,
                   HoverMonitor.shared.currentHovered() == self.id,
-                  !NSEvent.modifierFlags.contains(.option) else { return }
+                  !modifiers.contains(.option), !modifiers.contains(.command) else { return }
             self.beginAutoHide()
         }
     }
@@ -308,16 +353,24 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     // MARK: - 捕获
 
+    private var activeBaseRect: CGRect { selectedBaseRect ?? baseRect }
+
+    /// 当前真正可见的源坐标矩形。与 `currentSourceRect()` 不同，它从不返回 `.zero`，
+    /// 因此可用于把下一次框选精确映射回源坐标。
+    private func currentVisibleSourceRect() -> CGRect {
+        Geo.sourceRect(zoom: state.zoom, anchor: state.anchor, full: activeBaseRect)
+    }
+
     private func currentSourceRect() -> CGRect {
-        // 整窗 + 未放大时不下发裁剪框：`.zero` 让 SCK 直接给整个窗口内容。
-        // 这样即使 baseRect 没能及时跟上窗口尺寸（例如调度中心期间采样到被总览变换的
-        // 矩形），画面也只是宽高比暂时不准，不会被裁成窗口左上角局部。
-        if case .window = state.source,
+        // 整窗 + 未放大 + 没有框选基准时不下发裁剪框：`.zero` 让 SCK 直接给整个窗口内容。
+        // 一旦用户框选了任意区域（selectedBaseRect != nil），即使 zoom 回到 1 也必须保留该 crop。
+        if selectedBaseRect == nil,
+           case .window = state.source,
            state.zoom <= PiPSessionState.minZoom + 0.001,
            abs(baseRect.minX) < 0.5, abs(baseRect.minY) < 0.5 {
             return .zero
         }
-        return Geo.sourceRect(zoom: state.zoom, anchor: state.anchor, full: baseRect)
+        return currentVisibleSourceRect()
     }
 
     private func makeConfiguration(fps: Int? = nil) -> SCStreamConfiguration {
@@ -427,10 +480,16 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         guard isFullWindow else { return }   // 窗口内的区域捕获不跟随窗口尺寸变化
         guard let size = trustedSize(of: window) else { return }
         guard abs(baseRect.width - size.width) > 1 || abs(baseRect.height - size.height) > 1 else { return }
-        baseRect = CGRect(origin: .zero, size: size)
+        let oldBase = baseRect
+        let newBase = CGRect(origin: .zero, size: size)
+        if let selectedBaseRect {
+            self.selectedBaseRect = Geo.remap(selectedBaseRect, from: oldBase, to: newBase)
+            state.hasSelectionCrop = self.selectedBaseRect != nil
+        }
+        baseRect = newBase
         let scale = ShareableContentStore.shared.backingScale(of: window)
         sourcePixelSize = CGSize(width: size.width * scale, height: size.height * scale)
-        windowController.setAspect(size)
+        windowController.setAspect((selectedBaseRect ?? baseRect).size)
         state.anchor = Geo.clampAnchor(state.anchor, zoom: state.zoom)
     }
 
@@ -490,6 +549,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         }
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.isClosed else { return }
+            // 任何真实帧恢复都说明刚才的离屏 retarget 有效；允许下一次独立 stall 再尝试一次。
+            self.offscreenRetargetAttempted = false
             if case .streaming = self.runtimeState {} else if !self.state.isPaused {
                 self.update(runtimeState: .streaming)
                 self.reconnectAttempt = 0
@@ -515,8 +576,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func captureDidStall() {
         guard !isClosed, !state.isPaused, !state.isHidden, !isAutoHidden else { return }
         windowController.recordRendererEvent("capture.stall no-valid-frame")
-        // 没有新帧通常意味着源窗口被最小化或所在 Space 不可见
-        update(runtimeState: .waitingForSource)
+        // stall 只表示 transport 没有帧，不能直接推导 minimized/closed。
+        update(runtimeState: .sourceOffscreen)
         startProbeTimer()
     }
 
@@ -542,28 +603,86 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     }
 
     private func probeSource() {
-        guard !isClosed else { return }
+        guard !isClosed, !isSourceProbeInFlight else { return }
         switch state.source {
         case let .window(windowID, _, _, _):
-            ShareableContentStore.shared.window(id: windowID) { [weak self] window in
-                guard let self, !self.isClosed else { return }
-                if let window, window.isOnScreen {
-                    Log.debug("源窗口已恢复，重启流")
-                    self.probeTimer?.invalidate()
-                    self.probeTimer = nil
-                    self.syncBaseRectIfNeeded(with: window)
-                    self.engine.retarget(CaptureEngine.filter(for: window))
-                    self.restartCapture(reason: "源窗口恢复")
-                    self.update(runtimeState: .streaming)
-                    // 恢复瞬间可能落在退出总览的动画中间态，稍后再确认一次几何
-                    self.scheduleGeometryRecheck()
-                } else if window == nil {
-                    self.attemptRematch()
+            isSourceProbeInFlight = true
+            let expectedPID = sourcePID
+            Self.sourceProbeQueue.async { [weak self] in
+                let observation = SourceWindowActivator.lifecycleObservation(
+                    of: windowID,
+                    expectedPID: expectedPID
+                )
+                let health = classifySourceWindowHealth(observation)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.isClosed else { return }
+                    self.isSourceProbeInFlight = false
+                    self.applySourceHealth(health, windowID: windowID)
                 }
             }
         case .region:
             restartCapture(reason: "区域捕获恢复")
         }
+    }
+
+    /// 主线程应用后台生命周期探测结果。只有 SCK 本身需要 `SCWindow` 时才查询缓存。
+    private func applySourceHealth(_ health: SourceWindowHealth, windowID: CGWindowID) {
+        switch health {
+        case .onScreen:
+            offscreenRetargetAttempted = false
+            ShareableContentStore.shared.window(id: windowID) { [weak self] window in
+                guard let self, !self.isClosed, let window else { return }
+                self.resumeWindowCapture(
+                    window,
+                    reason: "源窗口回到当前 Space",
+                    syncGeometry: true,
+                    recheckGeometry: true
+                )
+            }
+
+        case .offScreenAlive:
+            update(runtimeState: .sourceOffscreen)
+            guard !offscreenRetargetAttempted else { return }
+            offscreenRetargetAttempted = true
+            // 全 Space 枚举能拿到新的 SCWindow 快照时，主动 retarget 一次。部分应用/SCK 版本可由此
+            // 恢复跨 Space 实时帧；若仍不供帧则保持最后一帧并继续 probe，不做循环重启。
+            ShareableContentStore.shared.window(id: windowID) { [weak self] window in
+                guard let self, !self.isClosed, let window else { return }
+                self.resumeWindowCapture(
+                    window,
+                    reason: "源窗口离屏 retarget",
+                    syncGeometry: false,
+                    recheckGeometry: false
+                )
+            }
+
+        case .minimized:
+            update(runtimeState: .minimized)
+
+        case .missing:
+            attemptRematch()
+
+        case .unknown:
+            update(runtimeState: .sourceOffscreen)
+        }
+    }
+
+    private func resumeWindowCapture(
+        _ window: SCWindow,
+        reason: String,
+        syncGeometry: Bool,
+        recheckGeometry: Bool
+    ) {
+        Log.debug("\(reason)，重建捕获目标")
+        probeTimer?.invalidate()
+        probeTimer = nil
+        // 其它 Space 的 SCWindow 快照只用于构造新的 content filter；它的 frame 不能用来更新
+        // baseRect / aspect，否则离屏几何可能污染裁剪与窗口比例，造成黑边和后续 zoom 错位。
+        if syncGeometry { syncBaseRectIfNeeded(with: window) }
+        engine.retarget(CaptureEngine.filter(for: window))
+        restartCapture(reason: reason)
+        update(runtimeState: .streaming)
+        if recheckGeometry { scheduleGeometryRecheck() }
     }
 
     private func scheduleReconnect() {
@@ -603,22 +722,38 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 return
             }
             Log.info("已重新匹配到源窗口：\(ShareableContentStore.shared.displayTitle(for: window))")
-            self.state.source = ShareableContentStore.shared.captureSource(for: window)
-            // 重新匹配同样不能照抄可能被总览变换过的尺寸
-            let size = self.trustedSize(of: window) ?? self.baseRect.size
-            self.baseRect = CGRect(origin: .zero, size: size)
-            let scale = ShareableContentStore.shared.backingScale(of: window)
-            self.sourcePixelSize = CGSize(width: size.width * scale, height: size.height * scale)
-            self.windowController.setTitle(self.state.source.displayTitle)
-            self.windowController.setAspect(size)
-            self.probeTimer?.invalidate()
-            self.probeTimer = nil
-            self.reconnectAttempt = 0
-            self.windowController.recordRendererEvent("capture.rematch source=\(self.state.source.displayTitle)")
-            self.windowController.prepareForCaptureDiscontinuity("源窗口重新匹配")
-            self.engine.stop()
-            self.startStream(filter: CaptureEngine.filter(for: window))
+            self.adoptRematchedWindow(window, reason: "源窗口重新匹配")
         }
+    }
+
+    private func adoptRematchedWindow(_ window: SCWindow, reason: String) {
+        state.source = ShareableContentStore.shared.captureSource(for: window)
+        sourcePID = window.owningApplication?.processID
+        offscreenRetargetAttempted = false
+        // 重匹配同样不能照抄可能被总览变换过的尺寸。若用户已框选区域，按旧基准的归一化位置
+        // 映射到新窗口尺寸，保持选区比例与相对位置，而不是重启后突然恢复整窗。
+        let size = trustedSize(of: window) ?? baseRect.size
+        let oldBase = baseRect
+        let newBase = CGRect(origin: .zero, size: size)
+        if let selectedBaseRect {
+            self.selectedBaseRect = Geo.remap(selectedBaseRect, from: oldBase, to: newBase)
+            state.hasSelectionCrop = self.selectedBaseRect != nil
+        }
+        baseRect = newBase
+        let scale = ShareableContentStore.shared.backingScale(of: window)
+        sourcePixelSize = CGSize(width: size.width * scale, height: size.height * scale)
+        windowController.setTitle(state.source.displayTitle)
+        windowController.setAspect((selectedBaseRect ?? baseRect).size)
+        probeTimer?.invalidate()
+        probeTimer = nil
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        reconnectAttempt = 0
+        windowController.recordRendererEvent("capture.rematch source=\(state.source.displayTitle) reason=\(reason)")
+        // 计划性 flush 保留 displayed image；直到新 stream 第一帧进来，用户仍看到旧源最后一帧。
+        windowController.prepareForCaptureDiscontinuity(reason)
+        engine.stop()
+        startStream(filter: CaptureEngine.filter(for: window))
     }
 
     private func handleSourceMissing() {
@@ -654,6 +789,10 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 guard let self, !self.isClosed, !self.state.isHidden else { return nil }
                 return self.windowController.barScreenFrame
             },
+            resizeZoneThicknessProvider: { [weak self] in
+                guard let self, !self.isClosed, !self.state.isHidden, self.state.autoHide else { return 0 }
+                return self.windowController.autoHideResizeHotZoneThickness
+            },
             onChange: { [weak self] hover in
                 self?.handleHover(hover)
             }
@@ -662,9 +801,12 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     /// 悬停状态处理。
     ///
-    /// 自动隐藏开启后浮窗会淡出并点击穿透，此时它收不到任何鼠标事件——所以留了两条唤回通道：
-    /// - **鼠标停在顶栏热区**：顶栏区域始终可操作（点按钮、按住拖动、右键），画面区域仍然穿透
-    /// - **按住 ⌥**：在画面区域也能把整窗临时唤回
+    /// 自动隐藏开启后浮窗会淡出并点击穿透，此时它收不到任何鼠标事件——所以靠 HoverMonitor
+    /// 的零权限轮询提供四条唤回通道：
+    /// - **按住 ⌘**：恢复内容区命中，使 Cmd 拖拽框选仍能工作；不弹控制条
+    /// - **按住 ⌥**：在画面区域把整窗临时唤回
+    /// - **鼠标靠近四边/四角**：恢复系统 resize 命中；不弹控制条
+    /// - **鼠标停在顶栏热区**：顶栏区域可操作（点按钮、按住拖动、右键）
     /// 另有一条保底出口在菜单栏的每会话子菜单里。
     private func handleHover(_ hover: HoverState) {
         guard !isClosed else { return }
@@ -679,16 +821,24 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             return
         }
 
-        guard hover.isHovering else {
-            endAutoHide()
+        // live resize 已经开始后不再相信鼠标是否还落在旧 frame 内；拖到窗外也必须保持可交互。
+        if isLiveResizing {
+            beginPeek(.resize)
             return
         }
 
-        if hover.isOverHotZone {
-            beginPeek(.bar)           // 热区优先于 ⌥
-        } else if hover.optionHeld {
+        switch autoHideHoverIntent(for: hover) {
+        case .leave:
+            endAutoHide()
+        case .resize:
+            beginPeek(.resize)
+        case .bar:
+            beginPeek(.bar)
+        case .command:
+            beginPeek(.commandZoom)
+        case .option:
             beginPeek(.option)
-        } else {
+        case .fade:
             beginAutoHide()
         }
     }
@@ -711,11 +861,17 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         isAutoHidden = true
         windowController.setAlpha(1, animated: true)
         windowController.setClickThrough(false)
-        windowController.setControlsVisible(true)
+        windowController.setControlsVisible(reason == .option || reason == .bar)
         if !state.isPaused, !state.isHidden { resumeCapture(reason: "自动隐藏临时唤回") }
         switch reason {
         case .option:
             windowController.showHint(L.t("松开 ⌥ 恢复透明", "Release ⌥ to fade again"), near: nil)
+        case .commandZoom:
+            // 不弹 hint / 控制条，避免挡住内容区的 Cmd 框选缩放手势。
+            windowController.showHint(nil, near: nil)
+        case .resize:
+            // 边缘只恢复系统 resize 命中，不弹控制条/提示，避免盖住用户正在抓的边角。
+            windowController.showHint(nil, near: nil)
         case .bar:
             windowController.showHint(L.t("移出顶栏后会重新淡出", "Leave the top bar to fade again"),
                                       near: nil, duration: 2.0)
@@ -776,6 +932,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     func pipRequestZoom(_ zoom: CGFloat, anchor: CGPoint) { applyZoom(zoom, anchor: anchor) }
 
+    func pipRequestSelection(_ normalizedRect: CGRect) { applySelection(normalizedRect) }
+
     func pipRequestPan(by delta: CGSize) {
         guard state.zoom > 1.001 else { return }
         state.anchor = Geo.anchor(state.anchor, pannedBy: delta, zoom: state.zoom)
@@ -783,6 +941,20 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     }
 
     func pipRequestZoomReset() { resetZoom() }
+
+    func pipWillStartLiveResize() {
+        guard !isClosed else { return }
+        isLiveResizing = true
+        if state.autoHide { beginPeek(.resize) }
+    }
+
+    func pipDidEndLiveResize() {
+        guard !isClosed else { return }
+        isLiveResizing = false
+        guard state.autoHide else { return }
+        // 立即按当前鼠标位置恢复 fade / bar / edge 状态，不等下一次轮询状态变化。
+        handleHover(HoverMonitor.shared.currentState(for: id))
+    }
 
     func pipDidResize(pointSize: CGSize, scale: CGFloat) {
         guard !isClosed else { return }

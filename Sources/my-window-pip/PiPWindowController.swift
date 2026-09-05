@@ -182,6 +182,8 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     private static let hintMinWindowAlpha: CGFloat = 0.99
     /// 顶栏热区在控制条上下各放宽的距离（`barScreenFrame`）
     private static let barHotZoneInset: CGFloat = 4
+    /// 自动隐藏时边缘 resize 热区厚度；同时覆盖窗内/窗外，让鼠标靠近边角即可恢复命中。
+    private static let resizeHotZoneThickness: CGFloat = 10
 
     // MARK: - 对外
 
@@ -198,6 +200,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     var backingScale: CGFloat { panel.screen?.backingScaleFactor ?? panel.backingScaleFactor }
 
     var frameOrigin: CGPoint { panel.frame.origin }
+
+    /// HoverMonitor 用的边缘 resize 热区厚度。
+    var autoHideResizeHotZoneThickness: CGFloat { Self.resizeHotZoneThickness }
 
     /// 供 HoverMonitor 校验鼠标是否落在本浮窗上
     var isHoveringMouse: Bool {
@@ -391,6 +396,9 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         // 手势回调 → delegate（窗口层不做任何状态决策）
         contentView.onRequestZoom = { [weak self] zoom, anchor in
             self?.delegate?.pipRequestZoom(zoom, anchor: anchor)
+        }
+        contentView.onRequestSelection = { [weak self] normalizedRect in
+            self?.delegate?.pipRequestSelection(normalizedRect)
         }
         contentView.onRequestPan = { [weak self] delta in
             self?.delegate?.pipRequestPan(by: delta)
@@ -702,7 +710,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         switch newState {
         case .sourceLost, .permissionDenied, .failed:
             contentView.flushAndReset()
-        case .streaming, .paused, .waitingForSource, .reconnecting:
+        case .streaming, .paused, .sourceOffscreen, .minimized, .waitingForSource, .reconnecting:
             break
         }
         refreshMenu()
@@ -801,6 +809,16 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
     }
 
     // MARK: - NSWindowDelegate
+
+    func windowWillStartLiveResize(_ notification: Notification) {
+        delegate?.pipWillStartLiveResize()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        delegate?.pipDidEndLiveResize()
+        // 最后一帧尺寸也要上报，避免 debounce work 在拖动结束前被覆盖。
+        scheduleResizeNotify()
+    }
 
     func windowDidResize(_ notification: Notification) {
         // 窗口尺寸变了：提示条要按新的内容区重新 clamp（控制条自己走 autoresizing）
@@ -966,11 +984,18 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         pauseItem.title = paused ? L.t("继续", "Resume") : L.t("暂停", "Pause")
 
         let zoom = state?.zoom ?? 1
-        zoomResetItem.title = zoom > 1.01
-            ? L.t("复位缩放（当前 \(String(format: "%.1f", zoom))×）",
-                  "Reset Zoom (now \(String(format: "%.1f", zoom))×)")
-            : L.t("复位缩放", "Reset Zoom")
-        zoomResetItem.isEnabled = zoom > 1.01
+        let cropped = state?.hasSelectionCrop ?? false
+        if zoom > 1.01 {
+            zoomResetItem.title = L.t(
+                "复位缩放（当前 \(String(format: "%.1f", zoom))×）",
+                "Reset Zoom (now \(String(format: "%.1f", zoom))×)"
+            )
+        } else if cropped {
+            zoomResetItem.title = L.t("恢复完整画面与原始比例", "Restore Full Frame & Aspect Ratio")
+        } else {
+            zoomResetItem.title = L.t("复位缩放", "Reset Zoom")
+        }
+        zoomResetItem.isEnabled = zoom > 1.01 || cropped
 
         autoHideItem.state = (state?.autoHide ?? false) ? .on : .off
         idleItem.state = (state?.idleDetection ?? true) ? .on : .off
