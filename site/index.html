@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b63f6">
-  <meta name="description" content="MyWindowPip：把任意 macOS 窗口或屏幕区域放进轻量、始终可见的 PiP 浮窗。">
+  <meta name="description" data-i18n-content="pageDescription" content="MyWindowPip：把任意 macOS 窗口或屏幕区域放进轻量、始终可见的 PiP 浮窗。">
   <link rel="icon" type="image/png" sizes="512x512" href="assets/my-window-pip-icon.png">
   <link rel="apple-touch-icon" sizes="512x512" href="assets/my-window-pip-icon.png">
-  <title>MyWindowPip — macOS 任意窗口画中画</title>
+  <title data-i18n="pageTitle">MyWindowPip — macOS 任意窗口画中画</title>
   <style>
     :root {
       color-scheme: light;
@@ -153,6 +153,49 @@
       color: #fff;
       font-size: 0.86rem;
       box-shadow: 0 9px 22px rgba(11, 99, 246, 0.23);
+    }
+
+    .language-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .language-switch[hidden] {
+      display: none;
+    }
+
+    .language-button {
+      min-height: 32px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.73rem;
+      font-weight: 800;
+      line-height: 1;
+      transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .language-button:hover {
+      color: var(--blue-deep);
+    }
+
+    .language-button.is-active {
+      background: var(--blue);
+      color: #fff;
+      box-shadow: 0 5px 13px rgba(11, 99, 246, 0.2);
+    }
+
+    .language-button.is-active:hover {
+      color: #fff;
     }
 
     .header-cta:hover,
@@ -1050,6 +1093,10 @@
         padding: 17px 0;
       }
 
+      .language-switch {
+        margin-left: auto;
+      }
+
       .site-nav {
         order: 3;
         width: 100%;
@@ -1159,6 +1206,12 @@
       .header-cta {
         padding-inline: 13px;
         font-size: 0.78rem;
+      }
+
+      .language-button {
+        min-height: 30px;
+        padding-inline: 8px;
+        font-size: 0.7rem;
       }
 
       .site-nav {
@@ -1310,33 +1363,37 @@
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="#top" aria-label="MyWindowPip 首页">
+    <a class="brand" href="#top" data-i18n-aria-label="brandHomeLabel" aria-label="MyWindowPip 首页">
       <img src="assets/my-window-pip-icon.png" alt="">
       <span class="brand-wordmark">MyWindowPip<span class="brand-dot">.</span></span>
     </a>
-    <nav class="site-nav" aria-label="主导航">
-      <a href="#how-it-works">怎么用</a>
-      <a href="#features">能力</a>
-      <a href="#privacy">权限与隐私</a>
-      <a href="#download">下载</a>
+    <nav class="site-nav" data-i18n-aria-label="mainNavLabel" aria-label="主导航">
+      <a href="#how-it-works"><span data-i18n="navHowItWorks">怎么用</span></a>
+      <a href="#features"><span data-i18n="navFeatures">能力</span></a>
+      <a href="#privacy"><span data-i18n="navPrivacy">权限与隐私</span></a>
+      <a href="#download"><span data-i18n="navDownload">下载</span></a>
     </nav>
-    <a class="header-cta" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg">下载 v0.1.6</a>
+    <div class="language-switch" data-language-switch data-i18n-aria-label="languageSwitchLabel" hidden role="group" aria-label="语言切换">
+      <button class="language-button is-active" type="button" data-language="zh" aria-pressed="true" lang="zh-CN">中文</button>
+      <button class="language-button" type="button" data-language="en" aria-pressed="false" lang="en">EN</button>
+    </div>
+    <a class="header-cta" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg"><span data-i18n="headerDownload">下载</span> v0.1.6</a>
   </header>
 
   <main id="top">
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="kicker">Picture-in-Picture for macOS</p>
-        <h1 id="hero-title">把重要的窗口，放进视线里。</h1>
-        <p class="hero-lede">MyWindowPip 把任意 macOS 窗口或屏幕区域变成轻量 PiP 浮窗。盯住编译、日志、AI agent、CI 面板或网页视频，同时继续做手头的事。</p>
+        <p class="kicker" data-i18n="heroKicker">Picture-in-Picture for macOS</p>
+        <h1 id="hero-title" data-i18n="heroTitle">把重要的窗口，放进视线里。</h1>
+        <p class="hero-lede" data-i18n="heroLede">MyWindowPip 把任意 macOS 窗口或屏幕区域变成轻量 PiP 浮窗。盯住编译、日志、AI agent、CI 面板或网页视频，同时继续做手头的事。</p>
         <div class="hero-actions">
-          <a class="button button-primary" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg">下载 MyWindowPip <span class="button-detail">v0.1.6 · DMG</span></a>
-          <a class="button button-secondary" href="https://github.com/ljzxzxl/my-window-pip" target="_blank" rel="noopener noreferrer">查看源码 <span aria-hidden="true">↗</span></a>
+          <a class="button button-primary" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg"><span data-i18n="heroDownload">下载 MyWindowPip</span> <span class="button-detail">v0.1.6 · DMG</span></a>
+          <a class="button button-secondary" href="https://github.com/ljzxzxl/my-window-pip" target="_blank" rel="noopener noreferrer"><span data-i18n="viewSource">查看源码</span> <span aria-hidden="true">↗</span></a>
         </div>
-        <p class="hero-note" aria-label="兼容性信息">
+        <p class="hero-note" data-i18n-aria-label="compatibilityLabel" aria-label="兼容性信息">
           <span>macOS 14+</span>
           <span>Apple Silicon + Intel</span>
-          <span>MIT 开源</span>
+          <span data-i18n="mitOpenSource">MIT 开源</span>
         </p>
       </div>
 
@@ -1344,14 +1401,14 @@
         <div class="demo-shell">
           <div class="demo-topbar">
             <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="demo-label">MyWindowPip / live workspace</span>
+            <span class="demo-label" data-i18n="demoLabel">MyWindowPip / live workspace</span>
             <span aria-hidden="true">•••</span>
           </div>
           <div class="demo-canvas" aria-hidden="true">
             <div class="source-window">
-              <div class="window-bar"><i></i><i></i><i></i><span class="window-title">Build Monitor</span></div>
+              <div class="window-bar"><i></i><i></i><i></i><span class="window-title" data-i18n="demoWindowTitle">Build Monitor</span></div>
               <div class="source-body">
-                <div class="source-overline">Universal release pipeline</div>
+                <div class="source-overline" data-i18n="demoPipeline">Universal release pipeline</div>
                 <div class="source-heading"></div>
                 <div class="source-lines"><span></span><span></span><span></span><span></span></div>
                 <div class="source-progress"></div>
@@ -1359,49 +1416,49 @@
             </div>
             <div class="pip-window">
               <div class="pip-bar"><span class="pip-live">LIVE</span><span aria-hidden="true">•••</span></div>
-              <div class="pip-content"><div><strong>78%</strong><small>源窗口保持可见</small></div></div>
+              <div class="pip-content"><div><strong>78%</strong><small data-i18n="pipStatus">源窗口保持可见</small></div></div>
             </div>
             <span class="demo-cursor"></span>
           </div>
         </div>
         <figcaption class="demo-caption">
-          <strong id="demo-title">交互示意：选中窗口，缩成浮窗，继续工作。</strong>
-          <span>当前为概念动效，不是实际产品录屏。</span>
+          <strong id="demo-title" data-i18n="demoTitle">交互示意：选中窗口，缩成浮窗，继续工作。</strong>
+          <span data-i18n="demoDisclaimer">当前为概念动效，不是实际产品录屏。</span>
         </figcaption>
       </figure>
     </section>
 
-    <section class="proof-strip" aria-label="产品概览">
-      <div class="proof-item"><strong>任意窗口</strong><span>也可以框选屏幕区域</span></div>
-      <div class="proof-item"><strong>跨 Space 可见</strong><span>浮窗低于系统下拉菜单</span></div>
-      <div class="proof-item"><strong>1×–20×</strong><span>捕获侧裁剪，放大仍清晰</span></div>
-      <div class="proof-item"><strong>本地处理</strong><span>无账号、无遥测</span></div>
+    <section class="proof-strip" data-i18n-aria-label="overviewLabel" aria-label="产品概览">
+      <div class="proof-item"><strong data-i18n="overviewWindow">任意窗口</strong><span data-i18n="overviewWindowDetail">也可以框选屏幕区域</span></div>
+      <div class="proof-item"><strong data-i18n="overviewSpaces">跨 Space 可见</strong><span data-i18n="overviewSpacesDetail">浮窗低于系统下拉菜单</span></div>
+      <div class="proof-item"><strong data-i18n="overviewZoom">1×–20×</strong><span data-i18n="overviewZoomDetail">捕获侧裁剪，放大仍清晰</span></div>
+      <div class="proof-item"><strong data-i18n="overviewLocal">本地处理</strong><span data-i18n="overviewLocalDetail">无账号、无遥测</span></div>
     </section>
 
     <section class="section" id="how-it-works" aria-labelledby="how-title">
       <div class="section-heading">
-        <p class="section-kicker">Small window, wider view</p>
-        <h2 id="how-title">三步，把注意力留在当前工作。</h2>
-        <p>从菜单栏创建一个浮窗，把它放在视线边缘；状态会自己保持更新，不需要反复切换应用。</p>
+        <p class="section-kicker" data-i18n="howKicker">Small window, wider view</p>
+        <h2 id="how-title" data-i18n="howTitle">三步，把注意力留在当前工作。</h2>
+        <p data-i18n="howLede">从菜单栏创建一个浮窗，把它放在视线边缘；状态会自己保持更新，不需要反复切换应用。</p>
       </div>
       <div class="workflow">
         <article class="workflow-step">
           <span class="step-index">01</span>
-          <h3>选中窗口或区域</h3>
-          <p>从菜单栏窗口列表选择，也可以框选屏幕区域。常用操作还可以使用全局快捷键。</p>
+          <h3 data-i18n="step1Title">选中窗口或区域</h3>
+          <p data-i18n="step1Text">从菜单栏窗口列表选择，也可以框选屏幕区域。常用操作还可以使用全局快捷键。</p>
           <span class="shortcut">⌃⌥P · ⌃⌥⇧P</span>
         </article>
         <article class="workflow-step">
           <span class="step-index">02</span>
-          <h3>调整浮窗位置</h3>
-          <p>拖到合适的位置，按需缩放、平移、设置帧率、自动隐藏和点击行为。</p>
-          <span class="shortcut">Cmd + 拖动 / 滚动</span>
+          <h3 data-i18n="step2Title">调整浮窗位置</h3>
+          <p data-i18n="step2Text">拖到合适的位置，按需缩放、平移、设置帧率、自动隐藏和点击行为。</p>
+          <span class="shortcut" data-i18n="step2Shortcut">Cmd + 拖动 / 滚动</span>
         </article>
         <article class="workflow-step">
           <span class="step-index">03</span>
-          <h3>继续做自己的事</h3>
-          <p>浮窗跨 Space 保持可见；完全遮挡时自动暂停，源窗口恢复或重启后可以重新连接。</p>
-          <span class="shortcut">继续工作 · 保持可见</span>
+          <h3 data-i18n="step3Title">继续做自己的事</h3>
+          <p data-i18n="step3Text">浮窗跨 Space 保持可见；完全遮挡时自动暂停，源窗口恢复或重启后可以重新连接。</p>
+          <span class="shortcut" data-i18n="step3Shortcut">继续工作 · 保持可见</span>
         </article>
       </div>
     </section>
@@ -1409,29 +1466,29 @@
     <section class="section" id="features" aria-labelledby="features-title">
       <div class="section-heading section-heading-split">
         <div>
-          <p class="section-kicker">Designed for the edge of your screen</p>
-          <h2 id="features-title">看得到，但不打断。</h2>
+          <p class="section-kicker" data-i18n="featuresKicker">Designed for the edge of your screen</p>
+          <h2 id="features-title" data-i18n="featuresTitle">看得到，但不打断。</h2>
         </div>
-        <p>把 MyWindowPip 当作工作区的一块安静侧屏：需要时看一眼，想专注时让它退到背景。</p>
+        <p data-i18n="featuresLede">把 MyWindowPip 当作工作区的一块安静侧屏：需要时看一眼，想专注时让它退到背景。</p>
       </div>
       <div class="capability-grid">
         <article class="capability">
           <span class="capability-number">01 / SELECT</span>
-          <h3>选中任何内容</h3>
-          <p>捕获任意可分享窗口，或框选屏幕区域。选中窗口后，浮窗会跟随源窗口，而不是只截取一张静态图片。</p>
-          <div class="capability-tags"><span>Window</span><span>Region</span><span>Multi-session</span></div>
+          <h3 data-i18n="capability1Title">选中任何内容</h3>
+          <p data-i18n="capability1Text">捕获任意可分享窗口，或框选屏幕区域。选中窗口后，浮窗会跟随源窗口，而不是只截取一张静态图片。</p>
+          <div class="capability-tags"><span data-i18n="tagWindow">Window</span><span data-i18n="tagRegion">Region</span><span data-i18n="tagMultiSession">Multi-session</span></div>
         </article>
         <article class="capability">
           <span class="capability-number">02 / KEEP CLEAR</span>
-          <h3>保持清晰可见</h3>
-          <p>跨 Space 和全屏应用显示，位于普通窗口之上但低于系统下拉菜单；缩放在捕获侧完成，文字和细节更利落。</p>
-          <div class="capability-tags"><span>All Spaces</span><span>1×–20×</span><span>Source crop</span></div>
+          <h3 data-i18n="capability2Title">保持清晰可见</h3>
+          <p data-i18n="capability2Text">跨 Space 和全屏应用显示，位于普通窗口之上但低于系统下拉菜单；缩放在捕获侧完成，文字和细节更利落。</p>
+          <div class="capability-tags"><span data-i18n="tagAllSpaces">All Spaces</span><span>1×–20×</span><span data-i18n="tagSourceCrop">Source crop</span></div>
         </article>
         <article class="capability">
           <span class="capability-number">03 / STAY QUIET</span>
-          <h3>长期运行不打扰</h3>
-          <p>静止检测会自动降低帧率，不可见时暂停拉流；自动隐藏、点击穿透、源窗口重连让浮窗留在工作流边缘。</p>
-          <div class="capability-tags"><span>1–60 fps</span><span>Auto-hide</span><span>Reconnect</span></div>
+          <h3 data-i18n="capability3Title">长期运行不打扰</h3>
+          <p data-i18n="capability3Text">静止检测会自动降低帧率，不可见时暂停拉流；自动隐藏、点击穿透、源窗口重连让浮窗留在工作流边缘。</p>
+          <div class="capability-tags"><span data-i18n="tagAdaptiveFps">1–60 fps</span><span data-i18n="tagAutoHide">Auto-hide</span><span data-i18n="tagReconnect">Reconnect</span></div>
         </article>
       </div>
     </section>
@@ -1439,45 +1496,254 @@
     <section class="section" id="privacy" aria-labelledby="privacy-title">
       <div class="trust-panel">
         <div>
-          <p class="section-kicker">Local by design</p>
-          <h2 id="privacy-title">你的画面，留在你的 Mac 上。</h2>
+          <p class="section-kicker" data-i18n="privacyKicker">Local by design</p>
+          <h2 id="privacy-title" data-i18n="privacyTitle">你的画面，留在你的 Mac 上。</h2>
         </div>
         <div>
           <ul class="trust-list">
-            <li><strong>屏幕录制 · 必需</strong><span>ScreenCaptureKit 用它捕获窗口和区域画面。</span></li>
-            <li><strong>Accessibility · 可选</strong><span>用于精确切回源窗口和增强模式。</span></li>
-            <li><strong>本地内存与显存</strong><span>画面不写入磁盘、不上传，也不做遥测。</span></li>
-            <li><strong>只在更新时联网</strong><span>应用除检查更新外不发起网络请求。</span></li>
+            <li><strong data-i18n="screenPermissionTitle">屏幕录制 · 必需</strong><span data-i18n="screenPermissionText">ScreenCaptureKit 用它捕获窗口和区域画面。</span></li>
+            <li><strong data-i18n="accessibilityTitle">Accessibility · 可选</strong><span data-i18n="accessibilityText">用于精确切回源窗口和增强模式。</span></li>
+            <li><strong data-i18n="localProcessingTitle">本地内存与显存</strong><span data-i18n="localProcessingText">画面不写入磁盘、不上传，也不做遥测。</span></li>
+            <li><strong data-i18n="networkTitle">只在更新时联网</strong><span data-i18n="networkText">应用除检查更新外不发起网络请求。</span></li>
           </ul>
-          <p class="trust-footnote">发布包使用自签名证书，尚未经过 Apple 公证。首次打开可能需要在 Finder 中右键选择“打开”；建议将应用拖入 <code>/Applications</code>。</p>
+          <p class="trust-footnote"><span data-i18n="trustFootnoteBeforePath">发布包使用自签名证书，尚未经过 Apple 公证。首次打开可能需要在 Finder 中右键选择“打开”；建议将应用拖入 </span><code>/Applications</code><span data-i18n="trustFootnoteAfterPath">。</span></p>
         </div>
       </div>
     </section>
 
     <section class="download-stage" id="download" aria-labelledby="download-title">
       <div>
-        <p class="section-kicker">v0.1.6 · Universal build</p>
-        <h2 id="download-title">下载，马上开始。</h2>
-        <p>一个通用 DMG，支持 Apple Silicon 与 Intel Mac，需要 macOS 14 或更高版本。应用常驻菜单栏，没有 Dock 主窗口。</p>
+        <p class="section-kicker" data-i18n="downloadKicker">v0.1.6 · Universal build</p>
+        <h2 id="download-title" data-i18n="downloadTitle">下载，马上开始。</h2>
+        <p data-i18n="downloadLede">一个通用 DMG，支持 Apple Silicon 与 Intel Mac，需要 macOS 14 或更高版本。应用常驻菜单栏，没有 Dock 主窗口。</p>
       </div>
       <div class="download-actions">
-        <a class="button button-primary" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg">下载 macOS DMG <span class="button-detail">v0.1.6</span></a>
-        <a class="button button-secondary" href="https://github.com/ljzxzxl/my-window-pip/releases/tag/v0.1.6" target="_blank" rel="noopener noreferrer">查看 Release <span aria-hidden="true">↗</span></a>
+        <a class="button button-primary" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg"><span data-i18n="downloadMac">下载 macOS DMG</span> <span class="button-detail">v0.1.6</span></a>
+        <a class="button button-secondary" href="https://github.com/ljzxzxl/my-window-pip/releases/tag/v0.1.6" target="_blank" rel="noopener noreferrer"><span data-i18n="viewRelease">查看 Release</span> <span aria-hidden="true">↗</span></a>
       </div>
       <div class="download-facts"><span>macOS 14+</span><span>arm64 + x86_64</span><span>Universal DMG</span><span>MIT License</span></div>
-      <p class="install-note"><strong>安装提示：</strong>请先将 App 拖入 <code>/Applications</code> 再启动，这有助于让屏幕录制授权在版本更新后保持稳定。屏幕录制权限是捕获功能所必需的，Accessibility 为可选增强权限。</p>
+      <p class="install-note"><strong data-i18n="installLabel">安装提示：</strong><span data-i18n="installNoteBeforePath">请先将 App 拖入 </span><code>/Applications</code><span data-i18n="installNoteAfterPath"> 再启动，这有助于让屏幕录制授权在版本更新后保持稳定。屏幕录制权限是捕获功能所必需的，Accessibility 为可选增强权限。</span></p>
     </section>
   </main>
 
   <footer class="site-footer">
     <div>
       <span class="footer-brand">MyWindowPip<span class="brand-dot">.</span></span>
-      <span class="footer-note">把重要的窗口，留在视线里。</span>
+      <span class="footer-note" data-i18n="footerNote">把重要的窗口，留在视线里。</span>
     </div>
     <div class="footer-links">
       <a href="https://github.com/ljzxzxl/my-window-pip" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
       <a href="https://github.com/ljzxzxl/my-window-pip/releases/tag/v0.1.6" target="_blank" rel="noopener noreferrer">Release <span aria-hidden="true">↗</span></a>
     </div>
   </footer>
+
+  <script>
+    const translations = {
+      zh: {
+        pageTitle: "MyWindowPip — macOS 任意窗口画中画",
+        pageDescription: "MyWindowPip：把任意 macOS 窗口或屏幕区域放进轻量、始终可见的 PiP 浮窗。",
+        brandHomeLabel: "MyWindowPip 首页",
+        mainNavLabel: "主导航",
+        languageSwitchLabel: "语言切换",
+        navHowItWorks: "怎么用",
+        navFeatures: "能力",
+        navPrivacy: "权限与隐私",
+        navDownload: "下载",
+        headerDownload: "下载",
+        heroKicker: "Picture-in-Picture for macOS",
+        heroTitle: "把重要的窗口，放进视线里。",
+        heroLede: "MyWindowPip 把任意 macOS 窗口或屏幕区域变成轻量 PiP 浮窗。盯住编译、日志、AI agent、CI 面板或网页视频，同时继续做手头的事。",
+        heroDownload: "下载 MyWindowPip",
+        viewSource: "查看源码",
+        compatibilityLabel: "兼容性信息",
+        mitOpenSource: "MIT 开源",
+        demoLabel: "MyWindowPip / live workspace",
+        demoWindowTitle: "Build Monitor",
+        demoPipeline: "Universal release pipeline",
+        pipStatus: "源窗口保持可见",
+        demoTitle: "交互示意：选中窗口，缩成浮窗，继续工作。",
+        demoDisclaimer: "当前为概念动效，不是实际产品录屏。",
+        overviewLabel: "产品概览",
+        overviewWindow: "任意窗口",
+        overviewWindowDetail: "也可以框选屏幕区域",
+        overviewSpaces: "跨 Space 可见",
+        overviewSpacesDetail: "浮窗低于系统下拉菜单",
+        overviewZoom: "1×–20×",
+        overviewZoomDetail: "捕获侧裁剪，放大仍清晰",
+        overviewLocal: "本地处理",
+        overviewLocalDetail: "无账号、无遥测",
+        howKicker: "小窗口，宽视野",
+        howTitle: "三步，把注意力留在当前工作。",
+        howLede: "从菜单栏创建一个浮窗，把它放在视线边缘；状态会自己保持更新，不需要反复切换应用。",
+        step1Title: "选中窗口或区域",
+        step1Text: "从菜单栏窗口列表选择，也可以框选屏幕区域。常用操作还可以使用全局快捷键。",
+        step2Title: "调整浮窗位置",
+        step2Text: "拖到合适的位置，按需缩放、平移、设置帧率、自动隐藏和点击行为。",
+        step2Shortcut: "Cmd + 拖动 / 滚动",
+        step3Title: "继续做自己的事",
+        step3Text: "浮窗跨 Space 保持可见；完全遮挡时自动暂停，源窗口恢复或重启后可以重新连接。",
+        step3Shortcut: "继续工作 · 保持可见",
+        featuresKicker: "为屏幕边缘而设计",
+        featuresTitle: "看得到，但不打断。",
+        featuresLede: "把 MyWindowPip 当作工作区的一块安静侧屏：需要时看一眼，想专注时让它退到背景。",
+        capability1Title: "选中任何内容",
+        capability1Text: "捕获任意可分享窗口，或框选屏幕区域。选中窗口后，浮窗会跟随源窗口，而不是只截取一张静态图片。",
+        tagWindow: "窗口",
+        tagRegion: "区域",
+        tagMultiSession: "多会话",
+        capability2Title: "保持清晰可见",
+        capability2Text: "跨 Space 和全屏应用显示，位于普通窗口之上但低于系统下拉菜单；缩放在捕获侧完成，文字和细节更利落。",
+        tagAllSpaces: "跨 Space",
+        tagSourceCrop: "源端裁剪",
+        capability3Title: "长期运行不打扰",
+        capability3Text: "静止检测会自动降低帧率，不可见时暂停拉流；自动隐藏、点击穿透、源窗口重连让浮窗留在工作流边缘。",
+        tagAdaptiveFps: "1–60 fps",
+        tagAutoHide: "自动隐藏",
+        tagReconnect: "自动重连",
+        privacyKicker: "本地优先",
+        privacyTitle: "你的画面，留在你的 Mac 上。",
+        screenPermissionTitle: "屏幕录制 · 必需",
+        screenPermissionText: "ScreenCaptureKit 用它捕获窗口和区域画面。",
+        accessibilityTitle: "Accessibility · 可选",
+        accessibilityText: "用于精确切回源窗口和增强模式。",
+        localProcessingTitle: "本地内存与显存",
+        localProcessingText: "画面不写入磁盘、不上传，也不做遥测。",
+        networkTitle: "只在更新时联网",
+        networkText: "应用除检查更新外不发起网络请求。",
+        trustFootnoteBeforePath: "发布包使用自签名证书，尚未经过 Apple 公证。首次打开可能需要在 Finder 中右键选择“打开”；建议将应用拖入 ",
+        trustFootnoteAfterPath: "。",
+        downloadKicker: "v0.1.6 · 通用版本",
+        downloadTitle: "下载，马上开始。",
+        downloadLede: "一个通用 DMG，支持 Apple Silicon 与 Intel Mac，需要 macOS 14 或更高版本。应用常驻菜单栏，没有 Dock 主窗口。",
+        downloadMac: "下载 macOS DMG",
+        viewRelease: "查看 Release",
+        installLabel: "安装提示：",
+        installNoteBeforePath: "请先将 App 拖入 ",
+        installNoteAfterPath: " 再启动，这有助于让屏幕录制授权在版本更新后保持稳定。屏幕录制权限是捕获功能所必需的，Accessibility 为可选增强权限。",
+        footerNote: "把重要的窗口，留在视线里。"
+      },
+      en: {
+        pageTitle: "MyWindowPip — Picture-in-Picture for any macOS window",
+        pageDescription: "MyWindowPip turns any macOS window or screen region into a lightweight, always-visible PiP panel.",
+        brandHomeLabel: "MyWindowPip home",
+        mainNavLabel: "Main navigation",
+        languageSwitchLabel: "Language",
+        navHowItWorks: "How it works",
+        navFeatures: "Features",
+        navPrivacy: "Permissions & privacy",
+        navDownload: "Download",
+        headerDownload: "Download",
+        heroKicker: "Picture-in-Picture for macOS",
+        heroTitle: "Keep important windows in view.",
+        heroLede: "MyWindowPip turns any macOS window or screen region into a lightweight PiP panel. Keep an eye on builds, logs, AI agents, CI dashboards, or web video while you keep working.",
+        heroDownload: "Download MyWindowPip",
+        viewSource: "View source",
+        compatibilityLabel: "Compatibility",
+        mitOpenSource: "MIT open source",
+        demoLabel: "MyWindowPip / live workspace",
+        demoWindowTitle: "Build Monitor",
+        demoPipeline: "Universal release pipeline",
+        pipStatus: "Source window stays visible",
+        demoTitle: "Interaction concept: select a window, make it PiP, keep working.",
+        demoDisclaimer: "Concept animation, not an actual product recording.",
+        overviewLabel: "Product overview",
+        overviewWindow: "Any window",
+        overviewWindowDetail: "Or select a screen region",
+        overviewSpaces: "Visible across Spaces",
+        overviewSpacesDetail: "Below system pop-up menus",
+        overviewZoom: "1×–20×",
+        overviewZoomDetail: "Source-side crop stays sharp",
+        overviewLocal: "Local processing",
+        overviewLocalDetail: "No account, no telemetry",
+        howKicker: "Small window, wider view",
+        howTitle: "Three steps to stay focused on the work at hand.",
+        howLede: "Create a floating panel from the menu bar and leave it at the edge of your view. Its status keeps updating without constant app switching.",
+        step1Title: "Select a window or region",
+        step1Text: "Choose a window from the menu-bar list or select a screen region. Global shortcuts are available for frequent actions.",
+        step2Title: "Place the PiP panel",
+        step2Text: "Move it where you want, then adjust zoom, pan, frame rate, auto-hide, and click behavior as needed.",
+        step2Shortcut: "Cmd + drag / scroll",
+        step3Title: "Keep doing your work",
+        step3Text: "The panel stays visible across Spaces, pauses when fully occluded, and can reconnect when the source window returns or restarts.",
+        step3Shortcut: "Keep working · stay visible",
+        featuresKicker: "Designed for the edge of your screen",
+        featuresTitle: "Visible, without the interruption.",
+        featuresLede: "Treat MyWindowPip as a quiet side screen for your workspace: glance when you need it, let it recede when you need focus.",
+        capability1Title: "Select anything",
+        capability1Text: "Capture any shareable window or select a screen region. A window capture follows its source instead of freezing a single screenshot.",
+        tagWindow: "Window",
+        tagRegion: "Region",
+        tagMultiSession: "Multi-session",
+        capability2Title: "Keep details clear",
+        capability2Text: "Stay visible across Spaces and full-screen apps, above normal windows but below system pop-up menus. Source-side cropping keeps zoomed text crisp.",
+        tagAllSpaces: "All Spaces",
+        tagSourceCrop: "Source crop",
+        capability3Title: "Run quietly for the long haul",
+        capability3Text: "Idle detection lowers the frame rate, invisible panels pause capture, and auto-hide, click-through, and reconnect keep the PiP out of your way.",
+        tagAdaptiveFps: "1–60 fps",
+        tagAutoHide: "Auto-hide",
+        tagReconnect: "Reconnect",
+        privacyKicker: "Local by design",
+        privacyTitle: "Your screen stays on your Mac.",
+        screenPermissionTitle: "Screen Recording · required",
+        screenPermissionText: "Used by ScreenCaptureKit to capture windows and screen regions.",
+        accessibilityTitle: "Accessibility · optional",
+        accessibilityText: "Used for precise source-window switching and enhanced mode.",
+        localProcessingTitle: "Local memory and VRAM",
+        localProcessingText: "Frames are not written to disk, uploaded, or used for telemetry.",
+        networkTitle: "Network only for updates",
+        networkText: "The app makes no network requests other than update checks.",
+        trustFootnoteBeforePath: "Release builds are self-signed and not notarized. On first launch, Finder may require a right-click and Open; we recommend moving the app to ",
+        trustFootnoteAfterPath: ".",
+        downloadKicker: "v0.1.6 · Universal build",
+        downloadTitle: "Download and get started.",
+        downloadLede: "One universal DMG supports Apple Silicon and Intel Macs running macOS 14 or later. The app lives in the menu bar with no Dock window.",
+        downloadMac: "Download macOS DMG",
+        viewRelease: "View Release",
+        installLabel: "Installation note:",
+        installNoteBeforePath: "Move the app to ",
+        installNoteAfterPath: " before launching it. A stable path helps Screen Recording permission survive updates. Screen Recording is required for capture; Accessibility is optional.",
+        footerNote: "Keep important windows in view."
+      }
+    };
+
+    const languageSwitch = document.querySelector("[data-language-switch]");
+    const languageButtons = [...document.querySelectorAll("[data-language]")];
+    const translatableElements = [...document.querySelectorAll("[data-i18n]")];
+    const contentAttributes = [...document.querySelectorAll("[data-i18n-content]")];
+    const ariaLabels = [...document.querySelectorAll("[data-i18n-aria-label]")];
+
+    function applyLanguage(language) {
+      const selected = translations[language] ? language : "zh";
+      const dictionary = translations[selected];
+
+      translatableElements.forEach((element) => {
+        const value = dictionary[element.dataset.i18n];
+        if (value !== undefined) element.textContent = value;
+      });
+      contentAttributes.forEach((element) => {
+        const value = dictionary[element.dataset.i18nContent];
+        if (value !== undefined) element.setAttribute("content", value);
+      });
+      ariaLabels.forEach((element) => {
+        const value = dictionary[element.dataset.i18nAriaLabel];
+        if (value !== undefined) element.setAttribute("aria-label", value);
+      });
+
+      document.documentElement.lang = selected === "en" ? "en" : "zh-CN";
+      document.title = dictionary.pageTitle;
+      languageButtons.forEach((button) => {
+        const active = button.dataset.language === selected;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+      if (languageSwitch) languageSwitch.hidden = false;
+    }
+
+    languageButtons.forEach((button) => {
+      button.addEventListener("click", () => applyLanguage(button.dataset.language));
+    });
+    applyLanguage("zh");
+  </script>
 </body>
 </html>
