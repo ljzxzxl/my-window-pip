@@ -1,0 +1,1481 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b63f6">
+  <meta name="description" content="MyWindowPip：把任意 macOS 窗口或屏幕区域放进轻量、始终可见的 PiP 浮窗。">
+  <title>MyWindowPip — macOS 任意窗口画中画</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f4f7ff;
+      --surface: #ffffff;
+      --surface-blue: #eaf2ff;
+      --ink: #07162f;
+      --muted: #52647d;
+      --blue: #0b63f6;
+      --blue-deep: #0648c8;
+      --sky: #59c8ff;
+      --navy: #07183a;
+      --line: rgba(18, 79, 169, 0.16);
+      --line-strong: rgba(18, 79, 169, 0.28);
+      --focus: #003fba;
+      --shadow: 0 24px 70px rgba(17, 65, 144, 0.14);
+      --max-width: 1180px;
+      --radius-xl: 36px;
+      --radius-lg: 24px;
+      --radius-md: 16px;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-width: 320px;
+      margin: 0;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 88% 4%, rgba(89, 200, 255, 0.2), transparent 24rem),
+        radial-gradient(circle at 2% 34%, rgba(11, 99, 246, 0.08), transparent 28rem),
+        var(--page);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+        "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    button,
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :where(a, button, [tabindex]):focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 4px;
+    }
+
+    .site-header,
+    main,
+    .site-footer {
+      width: min(calc(100% - 64px), var(--max-width));
+      margin-inline: auto;
+    }
+
+    .site-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+      min-height: 92px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      flex: 0 0 auto;
+      font-size: 1.08rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+
+    .brand img {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      box-shadow: 0 7px 18px rgba(11, 99, 246, 0.25);
+    }
+
+    .brand-wordmark {
+      display: inline-flex;
+      align-items: baseline;
+    }
+
+    .brand-dot {
+      color: var(--blue);
+    }
+
+    .site-nav {
+      display: flex;
+      align-items: center;
+      gap: clamp(16px, 3vw, 34px);
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    .site-nav a {
+      transition: color 160ms ease;
+    }
+
+    .site-nav a:hover,
+    .site-nav a:focus-visible {
+      color: var(--blue-deep);
+    }
+
+    .header-cta,
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      font-weight: 750;
+      line-height: 1.2;
+      transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+    }
+
+    .header-cta {
+      min-height: 42px;
+      padding: 0 18px;
+      background: var(--blue);
+      color: #fff;
+      font-size: 0.86rem;
+      box-shadow: 0 9px 22px rgba(11, 99, 246, 0.23);
+    }
+
+    .header-cta:hover,
+    .button-primary:hover {
+      background: var(--blue-deep);
+      box-shadow: 0 13px 28px rgba(11, 99, 246, 0.28);
+      transform: translateY(-2px);
+    }
+
+    main {
+      display: block;
+    }
+
+    section {
+      scroll-margin-top: 32px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
+      align-items: center;
+      gap: clamp(34px, 5vw, 76px);
+      min-height: 0;
+      padding: 42px 0 64px;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+    }
+
+    .kicker,
+    .section-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin: 0 0 20px;
+      color: var(--blue-deep);
+      font-size: 0.74rem;
+      font-weight: 850;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .kicker::before,
+    .section-kicker::before {
+      width: 24px;
+      height: 3px;
+      border-radius: 9px;
+      background: var(--blue);
+      content: "";
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.08;
+      letter-spacing: -0.055em;
+    }
+
+    h1 {
+      max-width: 560px;
+      margin-bottom: 24px;
+      font-size: clamp(2.9rem, 5.3vw, 5.4rem);
+    }
+
+    h2 {
+      margin-bottom: 18px;
+      font-size: clamp(2.3rem, 4.4vw, 4.6rem);
+    }
+
+    h3 {
+      margin-bottom: 12px;
+      font-size: clamp(1.25rem, 2vw, 1.7rem);
+    }
+
+    .hero-lede {
+      max-width: 520px;
+      margin-bottom: 30px;
+      color: var(--muted);
+      font-size: clamp(1.02rem, 1.5vw, 1.2rem);
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 25px;
+    }
+
+    .button {
+      min-height: 54px;
+      padding: 0 22px;
+      font-size: 0.95rem;
+    }
+
+    .button-primary {
+      background: var(--blue);
+      color: #fff;
+      box-shadow: 0 12px 25px rgba(11, 99, 246, 0.22);
+    }
+
+    .button-secondary {
+      border-color: var(--line-strong);
+      background: rgba(255, 255, 255, 0.52);
+      color: var(--ink);
+    }
+
+    .button-secondary:hover {
+      background: #fff;
+      border-color: var(--blue);
+      transform: translateY(-2px);
+    }
+
+    .button-detail {
+      opacity: 0.72;
+      font-size: 0.77rem;
+      font-weight: 650;
+    }
+
+    .hero-note {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px 18px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+    }
+
+    .hero-note span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .hero-note span::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--sky);
+      content: "";
+    }
+
+    .hero-demo {
+      position: relative;
+      min-width: 0;
+      margin: 0;
+    }
+
+    .demo-shell {
+      position: relative;
+      overflow: hidden;
+      min-height: 500px;
+      padding: 11px;
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.07)),
+        linear-gradient(135deg, #0752d5, #0c8cf1 54%, #63d4ff);
+      box-shadow: 0 28px 75px rgba(12, 83, 187, 0.27);
+      isolation: isolate;
+    }
+
+    .demo-shell::before,
+    .demo-shell::after {
+      position: absolute;
+      z-index: -1;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.16);
+      content: "";
+      filter: blur(2px);
+    }
+
+    .demo-shell::before {
+      width: 280px;
+      height: 280px;
+      top: -120px;
+      right: -40px;
+    }
+
+    .demo-shell::after {
+      width: 220px;
+      height: 220px;
+      bottom: -120px;
+      left: -90px;
+    }
+
+    .demo-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 39px;
+      padding: 0 14px;
+      border-radius: 17px 17px 8px 8px;
+      background: rgba(4, 28, 82, 0.7);
+      color: rgba(255, 255, 255, 0.86);
+      font-size: 0.73rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .demo-lights {
+      display: flex;
+      gap: 6px;
+    }
+
+    .demo-lights i {
+      display: block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+    }
+
+    .demo-lights i:nth-child(1) { background: #ff605c; }
+    .demo-lights i:nth-child(2) { background: #ffbd44; }
+    .demo-lights i:nth-child(3) { background: #00ca4e; }
+
+    .demo-label {
+      color: rgba(255, 255, 255, 0.58);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .demo-canvas {
+      position: relative;
+      min-height: 440px;
+      margin-top: 10px;
+      overflow: hidden;
+      border-radius: 10px 10px 25px 25px;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px),
+        linear-gradient(145deg, #071d51, #0c4bb4 55%, #107acb);
+      background-size: 34px 34px, 34px 34px, auto;
+    }
+
+    .demo-canvas::after {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(120deg, transparent 35%, rgba(255, 255, 255, 0.13) 49%, transparent 64%);
+      content: "";
+      transform: translateX(-120%);
+      animation: demo-sheen 7s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .source-window,
+    .pip-window {
+      position: absolute;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.34);
+      box-shadow: 0 22px 36px rgba(1, 17, 56, 0.34);
+    }
+
+    .source-window {
+      top: 54px;
+      left: 8%;
+      width: 68%;
+      height: 270px;
+      border-radius: 17px;
+      background: #f7faff;
+      animation: source-breathe 7s ease-in-out infinite;
+    }
+
+    .window-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 12px;
+      background: #e7eef9;
+    }
+
+    .window-bar i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .window-bar i:nth-child(1) { background: #ff605c; }
+    .window-bar i:nth-child(2) { background: #ffbd44; }
+    .window-bar i:nth-child(3) { background: #00ca4e; }
+
+    .window-title {
+      margin-left: 7px;
+      color: #50647f;
+      font-size: 0.65rem;
+      font-weight: 750;
+    }
+
+    .source-body {
+      padding: 22px 24px;
+      color: #0c2a5a;
+    }
+
+    .source-overline {
+      margin-bottom: 12px;
+      color: #5383c8;
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .source-heading {
+      width: 68%;
+      height: 19px;
+      margin-bottom: 17px;
+      border-radius: 7px;
+      background: #b5c9e8;
+    }
+
+    .source-lines {
+      display: grid;
+      gap: 10px;
+    }
+
+    .source-lines span {
+      display: block;
+      height: 9px;
+      border-radius: 7px;
+      background: #d8e4f5;
+    }
+
+    .source-lines span:nth-child(1) { width: 91%; }
+    .source-lines span:nth-child(2) { width: 76%; }
+    .source-lines span:nth-child(3) { width: 84%; }
+    .source-lines span:nth-child(4) { width: 55%; }
+
+    .source-progress {
+      width: 76%;
+      height: 10px;
+      margin-top: 27px;
+      overflow: hidden;
+      border-radius: 9px;
+      background: #dce8f7;
+    }
+
+    .source-progress::before {
+      display: block;
+      width: 72%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--blue), var(--sky));
+      content: "";
+      animation: progress 5s ease-in-out infinite alternate;
+    }
+
+    .pip-window {
+      right: 7%;
+      bottom: 42px;
+      width: 43%;
+      min-height: 176px;
+      border-radius: 18px;
+      background: linear-gradient(145deg, #0a64e9, #07388f);
+      animation: pip-float 4.5s ease-in-out infinite;
+    }
+
+    .pip-window::after {
+      position: absolute;
+      inset: 0;
+      border: 2px solid rgba(255, 255, 255, 0.62);
+      border-radius: inherit;
+      content: "";
+      opacity: 0;
+      animation: pip-pulse 4.5s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .pip-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 30px;
+      padding: 0 12px;
+      background: rgba(2, 22, 74, 0.34);
+      color: #fff;
+      font-size: 0.61rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+    }
+
+    .pip-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .pip-live::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #9ff4c4;
+      box-shadow: 0 0 0 4px rgba(159, 244, 196, 0.16);
+      content: "";
+    }
+
+    .pip-content {
+      display: grid;
+      place-items: center;
+      min-height: 113px;
+      color: rgba(255, 255, 255, 0.9);
+      text-align: center;
+    }
+
+    .pip-content strong {
+      display: block;
+      font-size: clamp(1.4rem, 3vw, 2rem);
+      letter-spacing: -0.06em;
+    }
+
+    .pip-content small {
+      display: block;
+      margin-top: 5px;
+      color: rgba(255, 255, 255, 0.68);
+      font-size: 0.66rem;
+    }
+
+    .demo-cursor {
+      position: absolute;
+      z-index: 2;
+      right: 32%;
+      bottom: 30%;
+      width: 0;
+      height: 0;
+      border-top: 13px solid transparent;
+      border-right: 4px solid transparent;
+      border-bottom: 13px solid transparent;
+      border-left: 9px solid #fff;
+      filter: drop-shadow(1px 2px 2px rgba(0, 0, 0, 0.35));
+      transform: rotate(-20deg);
+      animation: cursor-move 7s ease-in-out infinite;
+    }
+
+    .demo-caption {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px 18px;
+      margin: 14px 4px 0;
+      color: #436080;
+      font-size: 0.78rem;
+    }
+
+    .demo-caption strong {
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .demo-caption span {
+      color: #6d7f98;
+    }
+
+    .proof-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      overflow: hidden;
+      margin: 4px 0 118px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--line);
+      box-shadow: 0 12px 35px rgba(17, 65, 144, 0.06);
+    }
+
+    .proof-item {
+      min-height: 94px;
+      padding: 22px 24px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .proof-item strong,
+    .proof-item span {
+      display: block;
+    }
+
+    .proof-item strong {
+      margin-bottom: 4px;
+      font-size: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .proof-item span {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .section {
+      padding: 36px 0 118px;
+    }
+
+    .section-heading {
+      max-width: 730px;
+      margin-bottom: 45px;
+    }
+
+    .section-heading p:last-child {
+      max-width: 590px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .section-heading-split {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 35px;
+      max-width: none;
+    }
+
+    .section-heading-split > * {
+      flex: 1;
+    }
+
+    .section-heading-split > :last-child {
+      max-width: 400px;
+      padding-bottom: 6px;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--line);
+    }
+
+    .workflow-step {
+      position: relative;
+      min-height: 258px;
+      padding: 30px;
+      background: rgba(255, 255, 255, 0.74);
+    }
+
+    .workflow-step:not(:last-child)::after {
+      position: absolute;
+      top: 43px;
+      right: -7px;
+      z-index: 1;
+      width: 14px;
+      height: 14px;
+      border-top: 2px solid var(--blue);
+      border-right: 2px solid var(--blue);
+      background: var(--surface);
+      content: "";
+      transform: rotate(45deg);
+    }
+
+    .step-index {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      margin-bottom: 34px;
+      border-radius: 13px;
+      background: var(--blue);
+      color: #fff;
+      font-size: 0.82rem;
+      font-weight: 850;
+      box-shadow: 0 9px 20px rgba(11, 99, 246, 0.23);
+    }
+
+    .workflow-step p,
+    .capability p,
+    .trust-panel p,
+    .download-stage p {
+      color: var(--muted);
+    }
+
+    .workflow-step p,
+    .capability p {
+      margin-bottom: 0;
+      font-size: 0.93rem;
+    }
+
+    .shortcut {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 5px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface-blue);
+      color: var(--blue-deep);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      font-weight: 750;
+    }
+
+    .capability-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .capability {
+      min-height: 315px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: #fff;
+      box-shadow: 0 12px 34px rgba(17, 65, 144, 0.06);
+    }
+
+    .capability:nth-child(2) {
+      background: linear-gradient(155deg, #edf5ff, #fff);
+    }
+
+    .capability:nth-child(3) {
+      background: linear-gradient(155deg, #fff, #e8f8ff);
+    }
+
+    .capability-number {
+      display: block;
+      margin-bottom: 60px;
+      color: var(--blue);
+      font-size: 0.76rem;
+      font-weight: 850;
+      letter-spacing: 0.14em;
+    }
+
+    .capability-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 22px;
+    }
+
+    .capability-tags span {
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: var(--surface-blue);
+      color: #2b5b9d;
+      font-size: 0.68rem;
+      font-weight: 750;
+    }
+
+    .trust-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+      gap: clamp(35px, 8vw, 120px);
+      padding: clamp(34px, 6vw, 70px);
+      border-radius: var(--radius-xl);
+      background:
+        radial-gradient(circle at 88% 18%, rgba(89, 200, 255, 0.3), transparent 20rem),
+        linear-gradient(135deg, #061639, #0b4cb7);
+      color: #fff;
+      box-shadow: 0 28px 68px rgba(5, 45, 121, 0.24);
+    }
+
+    .trust-panel .section-kicker {
+      color: #9cddff;
+    }
+
+    .trust-panel .section-kicker::before {
+      background: #9cddff;
+    }
+
+    .trust-panel h2 {
+      max-width: 450px;
+      margin-bottom: 0;
+    }
+
+    .trust-panel p {
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .trust-list {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin: 0 0 22px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .trust-list li {
+      min-height: 124px;
+      padding: 19px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .trust-list strong,
+    .trust-list span {
+      display: block;
+    }
+
+    .trust-list strong {
+      margin-bottom: 7px;
+      font-size: 0.9rem;
+    }
+
+    .trust-list span {
+      color: rgba(255, 255, 255, 0.66);
+      font-size: 0.78rem;
+    }
+
+    .trust-footnote {
+      margin-bottom: 0;
+      font-size: 0.79rem;
+    }
+
+    .download-stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 32px;
+      margin: 0 0 110px;
+      padding: clamp(32px, 5vw, 58px);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(110deg, rgba(255, 255, 255, 0.95), rgba(232, 242, 255, 0.92)),
+        var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .download-stage h2 {
+      margin-bottom: 12px;
+      font-size: clamp(2.2rem, 4vw, 4rem);
+    }
+
+    .download-stage p {
+      max-width: 650px;
+      margin-bottom: 0;
+    }
+
+    .download-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      min-width: 220px;
+    }
+
+    .download-facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      grid-column: 1 / -1;
+      color: #486383;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .download-facts span::before {
+      margin-right: 7px;
+      color: var(--blue);
+      content: "•";
+    }
+
+    .install-note {
+      grid-column: 1 / -1;
+      max-width: 820px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      font-size: 0.8rem;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #e7eef9;
+      color: #164a9b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9em;
+    }
+
+    .site-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 112px;
+      padding: 28px 0;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .footer-brand {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--ink);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .footer-note {
+      display: block;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 18px;
+      color: var(--blue-deep);
+      font-weight: 750;
+    }
+
+    .footer-links a:hover,
+    .footer-links a:focus-visible {
+      text-decoration: underline;
+      text-underline-offset: 4px;
+    }
+
+    @keyframes pip-float {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      50% { transform: translate(-8px, -13px) rotate(-1.5deg); }
+    }
+
+    @keyframes pip-pulse {
+      0%, 55%, 100% { opacity: 0; transform: scale(0.96); }
+      65%, 78% { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes source-breathe {
+      0%, 100% { transform: translate(0, 0); }
+      50% { transform: translate(4px, 4px); }
+    }
+
+    @keyframes cursor-move {
+      0%, 18% { transform: translate(35px, -22px) rotate(-20deg); }
+      42%, 70% { transform: translate(-8px, 14px) rotate(-20deg); }
+      100% { transform: translate(35px, -22px) rotate(-20deg); }
+    }
+
+    @keyframes progress {
+      from { width: 55%; }
+      to { width: 82%; }
+    }
+
+    @keyframes demo-sheen {
+      0%, 20% { transform: translateX(-120%); }
+      55%, 100% { transform: translateX(120%); }
+    }
+
+    @media (max-width: 960px) {
+      .site-header,
+      main,
+      .site-footer {
+        width: min(calc(100% - 40px), var(--max-width));
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+        min-height: 0;
+        padding-top: 52px;
+      }
+
+      .hero-copy {
+        max-width: 720px;
+      }
+
+      .demo-shell {
+        min-height: 470px;
+      }
+
+      .demo-canvas {
+        min-height: 410px;
+      }
+
+      .source-window {
+        left: 9%;
+        width: 65%;
+      }
+
+      .proof-strip {
+        margin-bottom: 82px;
+      }
+
+      .trust-panel {
+        grid-template-columns: 1fr;
+        gap: 34px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .site-header {
+        flex-wrap: wrap;
+        padding: 17px 0;
+      }
+
+      .site-nav {
+        order: 3;
+        width: 100%;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 0.82rem;
+      }
+
+      .hero {
+        padding-top: 35px;
+      }
+
+      h1 {
+        font-size: clamp(3rem, 13vw, 5rem);
+      }
+
+      .demo-shell {
+        min-height: 410px;
+      }
+
+      .demo-canvas {
+        min-height: 350px;
+      }
+
+      .source-window {
+        top: 45px;
+        height: 220px;
+      }
+
+      .source-body {
+        padding: 17px;
+      }
+
+      .pip-window {
+        bottom: 28px;
+        width: 48%;
+        min-height: 150px;
+      }
+
+      .pip-content {
+        min-height: 88px;
+      }
+
+      .proof-strip,
+      .workflow,
+      .capability-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .proof-item {
+        min-height: 78px;
+      }
+
+      .workflow-step {
+        min-height: 0;
+      }
+
+      .workflow-step:not(:last-child)::after {
+        top: auto;
+        right: auto;
+        bottom: -7px;
+        left: 43px;
+        transform: rotate(135deg);
+      }
+
+      .step-index {
+        margin-bottom: 21px;
+      }
+
+      .section-heading-split {
+        display: block;
+      }
+
+      .section-heading-split > :last-child {
+        margin-top: 20px;
+      }
+
+      .capability {
+        min-height: 0;
+      }
+
+      .capability-number {
+        margin-bottom: 34px;
+      }
+
+      .trust-list {
+        grid-template-columns: 1fr;
+      }
+
+      .download-stage {
+        grid-template-columns: 1fr;
+        margin-bottom: 74px;
+      }
+
+      .download-actions {
+        width: min(100%, 320px);
+      }
+    }
+
+    @media (max-width: 480px) {
+      .site-header,
+      main,
+      .site-footer {
+        width: min(calc(100% - 28px), var(--max-width));
+      }
+
+      .header-cta {
+        padding-inline: 13px;
+        font-size: 0.78rem;
+      }
+
+      .site-nav {
+        overflow-x: auto;
+        justify-content: flex-start;
+        padding-bottom: 3px;
+      }
+
+      .site-nav a {
+        white-space: nowrap;
+      }
+
+      .hero-actions,
+      .button {
+        width: 100%;
+      }
+
+      .button {
+        min-height: 52px;
+      }
+
+      .demo-shell {
+        padding: 7px;
+        border-radius: 25px;
+      }
+
+      .demo-canvas {
+        min-height: 295px;
+      }
+
+      .source-window {
+        top: 35px;
+        left: 6%;
+        width: 78%;
+        height: 175px;
+      }
+
+      .window-bar {
+        height: 24px;
+        padding-inline: 8px;
+      }
+
+      .window-bar i {
+        width: 6px;
+        height: 6px;
+      }
+
+      .source-body {
+        padding: 13px;
+      }
+
+      .source-overline {
+        margin-bottom: 8px;
+        font-size: 0.5rem;
+      }
+
+      .source-heading {
+        height: 13px;
+        margin-bottom: 11px;
+      }
+
+      .source-lines {
+        gap: 6px;
+      }
+
+      .source-lines span {
+        height: 6px;
+      }
+
+      .source-progress {
+        height: 7px;
+        margin-top: 17px;
+      }
+
+      .pip-window {
+        right: 5%;
+        bottom: 21px;
+        width: 53%;
+        min-height: 122px;
+      }
+
+      .pip-bar {
+        min-height: 24px;
+        padding-inline: 8px;
+        font-size: 0.5rem;
+      }
+
+      .pip-content {
+        min-height: 72px;
+      }
+
+      .pip-content strong {
+        font-size: 1.15rem;
+      }
+
+      .pip-content small {
+        font-size: 0.53rem;
+      }
+
+      .demo-caption {
+        display: block;
+        font-size: 0.72rem;
+      }
+
+      .demo-caption span {
+        display: block;
+        margin-top: 4px;
+      }
+
+      .section {
+        padding-bottom: 78px;
+      }
+
+      .trust-panel,
+      .download-stage {
+        padding: 26px 20px;
+        border-radius: 25px;
+      }
+
+      .site-footer {
+        display: block;
+      }
+
+      .footer-links {
+        margin-top: 18px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+
+      .header-cta:hover,
+      .button-primary:hover,
+      .button-secondary:hover {
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="MyWindowPip 首页">
+      <img src="assets/my-window-pip-icon.png" alt="">
+      <span class="brand-wordmark">MyWindowPip<span class="brand-dot">.</span></span>
+    </a>
+    <nav class="site-nav" aria-label="主导航">
+      <a href="#how-it-works">怎么用</a>
+      <a href="#features">能力</a>
+      <a href="#privacy">权限与隐私</a>
+      <a href="#download">下载</a>
+    </nav>
+    <a class="header-cta" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg">下载 v0.1.6</a>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="kicker">Picture-in-Picture for macOS</p>
+        <h1 id="hero-title">把重要的窗口，放进视线里。</h1>
+        <p class="hero-lede">MyWindowPip 把任意 macOS 窗口或屏幕区域变成轻量 PiP 浮窗。盯住编译、日志、AI agent、CI 面板或网页视频，同时继续做手头的事。</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg">下载 MyWindowPip <span class="button-detail">v0.1.6 · DMG</span></a>
+          <a class="button button-secondary" href="https://github.com/ljzxzxl/my-window-pip" target="_blank" rel="noopener noreferrer">查看源码 <span aria-hidden="true">↗</span></a>
+        </div>
+        <p class="hero-note" aria-label="兼容性信息">
+          <span>macOS 14+</span>
+          <span>Apple Silicon + Intel</span>
+          <span>MIT 开源</span>
+        </p>
+      </div>
+
+      <figure class="hero-demo" aria-labelledby="demo-title">
+        <div class="demo-shell">
+          <div class="demo-topbar">
+            <span class="demo-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="demo-label">MyWindowPip / live workspace</span>
+            <span aria-hidden="true">•••</span>
+          </div>
+          <div class="demo-canvas" aria-hidden="true">
+            <div class="source-window">
+              <div class="window-bar"><i></i><i></i><i></i><span class="window-title">Build Monitor</span></div>
+              <div class="source-body">
+                <div class="source-overline">Universal release pipeline</div>
+                <div class="source-heading"></div>
+                <div class="source-lines"><span></span><span></span><span></span><span></span></div>
+                <div class="source-progress"></div>
+              </div>
+            </div>
+            <div class="pip-window">
+              <div class="pip-bar"><span class="pip-live">LIVE</span><span aria-hidden="true">•••</span></div>
+              <div class="pip-content"><div><strong>78%</strong><small>源窗口保持可见</small></div></div>
+            </div>
+            <span class="demo-cursor"></span>
+          </div>
+        </div>
+        <figcaption class="demo-caption">
+          <strong id="demo-title">交互示意：选中窗口，缩成浮窗，继续工作。</strong>
+          <span>当前为概念动效，不是实际产品录屏。</span>
+        </figcaption>
+      </figure>
+    </section>
+
+    <section class="proof-strip" aria-label="产品概览">
+      <div class="proof-item"><strong>任意窗口</strong><span>也可以框选屏幕区域</span></div>
+      <div class="proof-item"><strong>跨 Space 可见</strong><span>浮窗低于系统下拉菜单</span></div>
+      <div class="proof-item"><strong>1×–20×</strong><span>捕获侧裁剪，放大仍清晰</span></div>
+      <div class="proof-item"><strong>本地处理</strong><span>无账号、无遥测</span></div>
+    </section>
+
+    <section class="section" id="how-it-works" aria-labelledby="how-title">
+      <div class="section-heading">
+        <p class="section-kicker">Small window, wider view</p>
+        <h2 id="how-title">三步，把注意力留在当前工作。</h2>
+        <p>从菜单栏创建一个浮窗，把它放在视线边缘；状态会自己保持更新，不需要反复切换应用。</p>
+      </div>
+      <div class="workflow">
+        <article class="workflow-step">
+          <span class="step-index">01</span>
+          <h3>选中窗口或区域</h3>
+          <p>从菜单栏窗口列表选择，也可以框选屏幕区域。常用操作还可以使用全局快捷键。</p>
+          <span class="shortcut">⌃⌥P · ⌃⌥⇧P</span>
+        </article>
+        <article class="workflow-step">
+          <span class="step-index">02</span>
+          <h3>调整浮窗位置</h3>
+          <p>拖到合适的位置，按需缩放、平移、设置帧率、自动隐藏和点击行为。</p>
+          <span class="shortcut">Cmd + 拖动 / 滚动</span>
+        </article>
+        <article class="workflow-step">
+          <span class="step-index">03</span>
+          <h3>继续做自己的事</h3>
+          <p>浮窗跨 Space 保持可见；完全遮挡时自动暂停，源窗口恢复或重启后可以重新连接。</p>
+          <span class="shortcut">继续工作 · 保持可见</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="features" aria-labelledby="features-title">
+      <div class="section-heading section-heading-split">
+        <div>
+          <p class="section-kicker">Designed for the edge of your screen</p>
+          <h2 id="features-title">看得到，但不打断。</h2>
+        </div>
+        <p>把 MyWindowPip 当作工作区的一块安静侧屏：需要时看一眼，想专注时让它退到背景。</p>
+      </div>
+      <div class="capability-grid">
+        <article class="capability">
+          <span class="capability-number">01 / SELECT</span>
+          <h3>选中任何内容</h3>
+          <p>捕获任意可分享窗口，或框选屏幕区域。选中窗口后，浮窗会跟随源窗口，而不是只截取一张静态图片。</p>
+          <div class="capability-tags"><span>Window</span><span>Region</span><span>Multi-session</span></div>
+        </article>
+        <article class="capability">
+          <span class="capability-number">02 / KEEP CLEAR</span>
+          <h3>保持清晰可见</h3>
+          <p>跨 Space 和全屏应用显示，位于普通窗口之上但低于系统下拉菜单；缩放在捕获侧完成，文字和细节更利落。</p>
+          <div class="capability-tags"><span>All Spaces</span><span>1×–20×</span><span>Source crop</span></div>
+        </article>
+        <article class="capability">
+          <span class="capability-number">03 / STAY QUIET</span>
+          <h3>长期运行不打扰</h3>
+          <p>静止检测会自动降低帧率，不可见时暂停拉流；自动隐藏、点击穿透、源窗口重连让浮窗留在工作流边缘。</p>
+          <div class="capability-tags"><span>1–60 fps</span><span>Auto-hide</span><span>Reconnect</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="privacy" aria-labelledby="privacy-title">
+      <div class="trust-panel">
+        <div>
+          <p class="section-kicker">Local by design</p>
+          <h2 id="privacy-title">你的画面，留在你的 Mac 上。</h2>
+        </div>
+        <div>
+          <ul class="trust-list">
+            <li><strong>屏幕录制 · 必需</strong><span>ScreenCaptureKit 用它捕获窗口和区域画面。</span></li>
+            <li><strong>Accessibility · 可选</strong><span>用于精确切回源窗口和增强模式。</span></li>
+            <li><strong>本地内存与显存</strong><span>画面不写入磁盘、不上传，也不做遥测。</span></li>
+            <li><strong>只在更新时联网</strong><span>应用除检查更新外不发起网络请求。</span></li>
+          </ul>
+          <p class="trust-footnote">发布包使用自签名证书，尚未经过 Apple 公证。首次打开可能需要在 Finder 中右键选择“打开”；建议将应用拖入 <code>/Applications</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="download-stage" id="download" aria-labelledby="download-title">
+      <div>
+        <p class="section-kicker">v0.1.6 · Universal build</p>
+        <h2 id="download-title">下载，马上开始。</h2>
+        <p>一个通用 DMG，支持 Apple Silicon 与 Intel Mac，需要 macOS 14 或更高版本。应用常驻菜单栏，没有 Dock 主窗口。</p>
+      </div>
+      <div class="download-actions">
+        <a class="button button-primary" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg">下载 macOS DMG <span class="button-detail">v0.1.6</span></a>
+        <a class="button button-secondary" href="https://github.com/ljzxzxl/my-window-pip/releases/tag/v0.1.6" target="_blank" rel="noopener noreferrer">查看 Release <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="download-facts"><span>macOS 14+</span><span>arm64 + x86_64</span><span>Universal DMG</span><span>MIT License</span></div>
+      <p class="install-note"><strong>安装提示：</strong>请先将 App 拖入 <code>/Applications</code> 再启动，这有助于让屏幕录制授权在版本更新后保持稳定。屏幕录制权限是捕获功能所必需的，Accessibility 为可选增强权限。</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div>
+      <span class="footer-brand">MyWindowPip<span class="brand-dot">.</span></span>
+      <span class="footer-note">把重要的窗口，留在视线里。</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/ljzxzxl/my-window-pip" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+      <a href="https://github.com/ljzxzxl/my-window-pip/releases/tag/v0.1.6" target="_blank" rel="noopener noreferrer">Release <span aria-hidden="true">↗</span></a>
+    </div>
+  </footer>
+</body>
+</html>
