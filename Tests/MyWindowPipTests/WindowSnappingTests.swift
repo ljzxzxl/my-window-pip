@@ -84,4 +84,56 @@ final class WindowSnappingTests: XCTestCase {
 
         XCTAssertEqual(snapped, proposed)
     }
+
+    func testScreenSelectionPrefersLargestOverlapAcrossDisplays() {
+        // 左屏带负坐标，右屏与左屏之间留 40pt 空洞，模拟真实的多显示器排布。
+        let screenFrames = [
+            CGRect(x: -1440, y: -200, width: 1440, height: 900),
+            CGRect(x: 40, y: 0, width: 1920, height: 1080),
+        ]
+
+        let mostlyOnLeft = CGRect(x: -300, y: 100, width: 300, height: 180)
+        XCTAssertEqual(
+            Geo.indexOfScreen(containing: mostlyOnLeft, screenFrames: screenFrames),
+            0
+        )
+
+        let mostlyOnRight = CGRect(x: -20, y: 100, width: 300, height: 180)
+        XCTAssertEqual(
+            Geo.indexOfScreen(containing: mostlyOnRight, screenFrames: screenFrames),
+            1
+        )
+    }
+
+    func testScreenSelectionFallsBackToNearestDisplayInsideGap() {
+        let screenFrames = [
+            CGRect(x: -1440, y: -200, width: 1440, height: 900),
+            CGRect(x: 40, y: 0, width: 1920, height: 1080),
+        ]
+
+        // 整窗落在两块屏幕之间的 40pt 空洞里：没有任何重叠，应取距窗口中心最近的一块。
+        let insideGap = CGRect(x: 14, y: 400, width: 24, height: 24)
+        XCTAssertEqual(
+            Geo.indexOfScreen(containing: insideGap, screenFrames: screenFrames),
+            1
+        )
+
+        XCTAssertNil(Geo.indexOfScreen(containing: insideGap, screenFrames: []))
+    }
+
+    func testSquaredDistanceIsZeroInsideRectAndGrowsOutside() {
+        let rect = CGRect(x: -100, y: -50, width: 200, height: 100)
+
+        XCTAssertEqual(Geo.squaredDistance(from: CGPoint(x: 0, y: 0), to: rect), 0, accuracy: 0.001)
+        XCTAssertEqual(
+            Geo.squaredDistance(from: CGPoint(x: -103, y: -54), to: rect),
+            3 * 3 + 4 * 4,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            Geo.squaredDistance(from: CGPoint(x: 106, y: 58), to: rect),
+            6 * 6 + 8 * 8,
+            accuracy: 0.001
+        )
+    }
 }

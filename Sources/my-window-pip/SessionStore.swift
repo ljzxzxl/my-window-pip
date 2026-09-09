@@ -210,32 +210,15 @@ final class SessionStore {
     }
 
     /// 跨屏拖动时取与窗口重叠面积最大的屏幕，避免固定使用 `NSScreen.main`。
+    /// 屏幕归属用完整 frame 判定；`visibleFrame` 排除 Dock / 菜单栏，
+    /// 只适合作为最终的磁吸安全边界。
     private func targetScreen(for frame: CGRect) -> NSScreen? {
         let screens = NSScreen.screens
-        guard let best = screens.max(by: { lhs, rhs in
-            // 屏幕归属用完整 frame 判定；visibleFrame 排除 Dock / 菜单栏，
-            // 只适合作为最终的磁吸安全边界。
-            overlapArea(lhs.frame, frame) < overlapArea(rhs.frame, frame)
-        }) else { return nil }
-        if overlapArea(best.frame, frame) > 0 { return best }
-
-        // 极快拖动可能让 proposed frame 短暂落在显示器之间的空洞；
-        // 此时选距窗口中心最近的屏幕，不依赖数组顺序的平局结果。
-        let center = CGPoint(x: frame.midX, y: frame.midY)
-        return screens.min {
-            squaredDistance(from: center, to: $0.frame) < squaredDistance(from: center, to: $1.frame)
-        }
-    }
-
-    private func overlapArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
-        let intersection = lhs.intersection(rhs)
-        return intersection.isNull ? 0 : intersection.width * intersection.height
-    }
-
-    private func squaredDistance(from point: CGPoint, to rect: CGRect) -> CGFloat {
-        let dx = max(max(rect.minX - point.x, 0), point.x - rect.maxX)
-        let dy = max(max(rect.minY - point.y, 0), point.y - rect.maxY)
-        return dx * dx + dy * dy
+        guard let index = Geo.indexOfScreen(
+            containing: frame,
+            screenFrames: screens.map(\.frame)
+        ) else { return nil }
+        return screens[index]
     }
 
     private func isSameDisplay(_ lhs: NSScreen, _ rhs: NSScreen) -> Bool {

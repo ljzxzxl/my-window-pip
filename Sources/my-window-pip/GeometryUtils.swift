@@ -275,6 +275,66 @@ enum Geo {
             .min { abs($0) < abs($1) }
     }
 
+    /// 在多个屏幕矩形里选出承载 `frame` 的那一块：优先重叠面积最大；
+    /// 窗口整体落在显示器之间的空洞时退回距窗口中心最近的屏幕。
+    ///
+    /// 返回下标而不是矩形，调用方可以映射回自己的 `NSScreen`；平局固定取靠前的下标，
+    /// 结果不随数组顺序之外的因素抖动。
+    static func indexOfScreen(containing frame: CGRect, screenFrames: [CGRect]) -> Int? {
+        guard !screenFrames.isEmpty else { return nil }
+
+        var bestIndex = 0
+        var bestOverlap = overlapArea(screenFrames[0], frame)
+        for index in screenFrames.indices.dropFirst() {
+            let overlap = overlapArea(screenFrames[index], frame)
+            if overlap > bestOverlap {
+                bestOverlap = overlap
+                bestIndex = index
+            }
+        }
+        if bestOverlap > 0 { return bestIndex }
+
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        var nearestIndex = 0
+        var nearestDistance = squaredDistance(from: center, to: screenFrames[0])
+        for index in screenFrames.indices.dropFirst() {
+            let distance = squaredDistance(from: center, to: screenFrames[index])
+            if distance < nearestDistance {
+                nearestDistance = distance
+                nearestIndex = index
+            }
+        }
+        return nearestIndex
+    }
+
+    private static func overlapArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        return intersection.isNull ? 0 : intersection.width * intersection.height
+    }
+
+    /// 点到矩形的最小距离平方；点落在矩形内时为 0。
+    static func squaredDistance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx: CGFloat
+        if point.x < rect.minX {
+            dx = rect.minX - point.x
+        } else if point.x > rect.maxX {
+            dx = point.x - rect.maxX
+        } else {
+            dx = 0
+        }
+
+        let dy: CGFloat
+        if point.y < rect.minY {
+            dy = rect.minY - point.y
+        } else if point.y > rect.maxY {
+            dy = point.y - rect.maxY
+        } else {
+            dy = 0
+        }
+
+        return dx * dx + dy * dy
+    }
+
     // MARK: - DEBUG 自检
 
     #if DEBUG
@@ -353,6 +413,25 @@ enum Geo {
         let distant = CGRect(x: 649, y: 50, width: 200, height: 100)
         let unchanged = snappedWindowFrame(free, in: visible, siblings: [distant])
         assert(unchanged == free, "远离屏幕边缘和无关浮窗时不应磁吸")
+
+        // 多显示器归属：重叠面积优先，落在显示器空洞里时取最近的一块
+        let screenFrames = [
+            CGRect(x: -1440, y: -200, width: 1440, height: 900),
+            CGRect(x: 40, y: 0, width: 1920, height: 1080),
+        ]
+        assert(indexOfScreen(containing: CGRect(x: -300, y: 100, width: 300, height: 180),
+                             screenFrames: screenFrames) == 0,
+               "主要落在左屏时应选左屏")
+        assert(indexOfScreen(containing: CGRect(x: -20, y: 100, width: 300, height: 180),
+                             screenFrames: screenFrames) == 1,
+               "重叠面积更大的一侧应胜出")
+        assert(indexOfScreen(containing: CGRect(x: 14, y: 400, width: 24, height: 24),
+                             screenFrames: screenFrames) == 1,
+               "落在显示器空洞时应取最近的屏幕")
+        assert(indexOfScreen(containing: visible, screenFrames: []) == nil,
+               "没有屏幕时不应给出归属")
+        assert(squaredDistance(from: .zero, to: CGRect(x: -100, y: -50, width: 200, height: 100)) == 0,
+               "点在矩形内距离应为 0")
 
         Log.debug("Geo 自检通过")
     }
