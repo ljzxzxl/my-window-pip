@@ -62,16 +62,20 @@ final class SessionStore {
     func pip(window: SCWindow) {
         guard Permissions.ensureScreenRecording() else { return }
 
-        // 去重：同一个窗口已经有浮窗了，就把它提到最前并高亮提示
-        if let existing = session(windowID: window.windowID) {
+        let store = ShareableContentStore.shared
+        let source = store.captureSource(for: window)
+
+        // 去重：同一个窗口已经有浮窗了，就把它提到最前并高亮提示。
+        // WindowServer 可能把已销毁窗口的 ID 分配给别的应用，此时旧会话正在等待重连，
+        // 直接按 ID 去重会把新窗口错认成它；再比一次所属应用即可排除。
+        if let existing = session(windowID: window.windowID),
+           existing.positionFallbackPreferenceKey == source.preferenceKey {
             existing.bringToFront()
             existing.flashHighlight()
             return
         }
         guard confirmIfOverLimit() else { return }
 
-        let store = ShareableContentStore.shared
-        let source = store.captureSource(for: window)
         let size = window.frame.size
         guard size.width > 1, size.height > 1 else { return }
         let positionIdentity = PositionMemoryIdentity.window(
