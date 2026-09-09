@@ -198,6 +198,83 @@ enum Geo {
         return r
     }
 
+    // MARK: - 窗口磁吸
+
+    /// 把正在拖动的浮窗吸附到屏幕边缘或相邻浮窗。
+    ///
+    /// 磁吸只修正 `origin`，绝不改变窗口尺寸：拖动是「移动」手势，用户已经调好的
+    /// 宽度和源画面宽高比不应因为靠近另一个窗口而突然跳变。
+    ///
+    /// - Parameters:
+    ///   - proposed: 鼠标位移换算出的原始 frame。
+    ///   - visibleFrame: 目标屏幕的实时 `visibleFrame`。
+    ///   - siblings: 同一屏幕上其他可见 PiP 的 frame。
+    ///   - threshold: 进入磁吸的最大距离。
+    ///   - gap: 两个相邻浮窗之间保留的间距。
+    ///   - edgeInset: 浮窗与屏幕可见边缘之间的内缩。
+    static func snappedWindowFrame(
+        _ proposed: CGRect,
+        in visibleFrame: CGRect,
+        siblings: [CGRect],
+        threshold: CGFloat = 12,
+        gap: CGFloat = 0,
+        edgeInset: CGFloat = 12
+    ) -> CGRect {
+        guard proposed.width > 0, proposed.height > 0,
+              visibleFrame.width > 0, visibleFrame.height > 0,
+              threshold >= 0 else { return proposed }
+
+        var xDeltas = [
+            visibleFrame.minX + edgeInset - proposed.minX,
+            visibleFrame.maxX - edgeInset - proposed.maxX,
+        ]
+        var yDeltas = [
+            visibleFrame.minY + edgeInset - proposed.minY,
+            visibleFrame.maxY - edgeInset - proposed.maxY,
+        ]
+
+        for sibling in siblings where sibling.width > 0 && sibling.height > 0
+            && visibleFrame.intersects(sibling) {
+            // X 轴只参考垂直投影重叠或已经快要上下相邻的窗口，
+            // 避免被屏幕另一头的无关窗口拉过去。Y 轴同理。
+            if intervalsAreNear(proposed.minY, proposed.maxY, sibling.minY, sibling.maxY,
+                                tolerance: gap + threshold) {
+                xDeltas.append(contentsOf: [
+                    sibling.minX - proposed.minX,                  // 左边对齐
+                    sibling.maxX - proposed.maxX,                  // 右边对齐
+                    sibling.minX - gap - proposed.maxX,            // 放到 sibling 左边
+                    sibling.maxX + gap - proposed.minX,            // 放到 sibling 右边
+                ])
+            }
+            if intervalsAreNear(proposed.minX, proposed.maxX, sibling.minX, sibling.maxX,
+                                tolerance: gap + threshold) {
+                yDeltas.append(contentsOf: [
+                    sibling.minY - proposed.minY,                  // 底边对齐
+                    sibling.maxY - proposed.maxY,                  // 顶边对齐
+                    sibling.minY - gap - proposed.maxY,            // 放到 sibling 下方
+                    sibling.maxY + gap - proposed.minY,            // 放到 sibling 上方
+                ])
+            }
+        }
+
+        var result = proposed
+        if let dx = closestSnapDelta(in: xDeltas, threshold: threshold) { result.origin.x += dx }
+        if let dy = closestSnapDelta(in: yDeltas, threshold: threshold) { result.origin.y += dy }
+        return result
+    }
+
+    private static func intervalsAreNear(_ aMin: CGFloat, _ aMax: CGFloat,
+                                         _ bMin: CGFloat, _ bMax: CGFloat,
+                                         tolerance: CGFloat) -> Bool {
+        max(aMin, bMin) <= min(aMax, bMax) + tolerance
+    }
+
+    private static func closestSnapDelta(in candidates: [CGFloat], threshold: CGFloat) -> CGFloat? {
+        candidates
+            .filter { $0.isFinite && abs($0) <= threshold }
+            .min { abs($0) < abs($1) }
+    }
+
     // MARK: - DEBUG 自检
 
     #if DEBUG
@@ -256,6 +333,26 @@ enum Geo {
         assert(trustedSourceSize(sampled: CGSize(width: 800, height: 600),
                                  current: .zero, axSize: nil) != nil,
                "current 非法时应直接采纳采样值")
+
+        // 窗口磁吸：屏幕边缘只改位置，不改尺寸
+        let visible = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let nearRight = CGRect(x: 689, y: 200, width: 300, height: 180)
+        let snappedRight = snappedWindowFrame(nearRight, in: visible, siblings: [])
+        assert(abs(snappedRight.maxX - 988) < 0.001, "应吸附到屏幕右边 12pt 内缩")
+        assert(snappedRight.size == nearRight.size, "磁吸不应改变窗口尺寸")
+
+        // 相邻窗口：右边对齐，上下边缘无间隙贴合
+        let sibling = CGRect(x: 700, y: 300, width: 200, height: 100)
+        let nearAbove = CGRect(x: 702, y: 403, width: 200, height: 100)
+        let snappedAbove = snappedWindowFrame(nearAbove, in: visible, siblings: [sibling])
+        assert(abs(snappedAbove.maxX - sibling.maxX) < 0.001, "相邻浮窗应能右边对齐")
+        assert(abs(snappedAbove.minY - sibling.maxY) < 0.001, "上下相邻浮窗应无间隙贴合")
+
+        // 超过阈值不磁吸；垂直方向遥远的窗口也不应影响 X 对齐
+        let free = CGRect(x: 650, y: 650, width: 200, height: 100)
+        let distant = CGRect(x: 649, y: 50, width: 200, height: 100)
+        let unchanged = snappedWindowFrame(free, in: visible, siblings: [distant])
+        assert(unchanged == free, "远离屏幕边缘和无关浮窗时不应磁吸")
 
         Log.debug("Geo 自检通过")
     }

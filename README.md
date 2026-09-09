@@ -42,6 +42,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 - Turn the frontmost window into a PiP with one hotkey (`⌃⌥P`), or pick a window from the menu bar list.
 - Capture any screen region (`⌃⌥⇧P`); if the selection lands inside a window, a window stream is used instead, so it follows the window and keeps working when the window is covered.
 - Multiple PiP windows at once, cascaded automatically; position and width remembered per app.
+- Drag a PiP near a screen edge or another PiP to snap it into place; adjacent PiPs join with no gap. Snapping never resizes the window; hold `Control` while dragging to bypass it temporarily.
 - Floating, borderless, aspect-locked, visible on all Spaces and above full-screen apps — but below system pop-up menus, so menu bar utilities still open on top of it.
 
 **Zoom & pan**
@@ -144,7 +145,7 @@ bash scripts/build-app.sh --fast       # current architecture only
 bash scripts/build-app.sh --debug      # DEBUG logging + geometry self-checks
 bash scripts/build-app.sh --install    # also install to /Applications
 bash packaging/make-dmg.sh             # dist/MyWindowPip-<version>.dmg + SHA256
-swift test                             # deterministic renderer recovery tests (needs full Xcode)
+swift test                             # deterministic renderer recovery + window snapping tests (needs full Xcode)
 ```
 
 Built-in self-tests (no UI, useful after any change):
@@ -171,7 +172,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 | Path | Purpose |
 |---|---|
 | `Sources/my-window-pip/` | All Swift sources: capture layer (`CaptureEngine`, `ShareableContentStore`, `FrameGate`, `IdleDetector`), presentation layer (`PiPWindowController`, `PiPContentView`, overlay views), session layer (`PiPSession`, `SessionStore`), input layer (hotkeys, event tap, hover monitor, region selection) and foundation (`Models`, `Geo`, `Preferences`, `Permissions`, `Updater`) |
-| `Tests/MyWindowPipTests/` | Deterministic unit tests for renderer stalls and recovery escalation |
+| `Tests/MyWindowPipTests/` | Deterministic unit tests for renderer recovery and window snapping |
 | `Resources/` | `Info.plist` and the 1024×1024 icon source |
 | `scripts/build-app.sh` | Builds both architectures with `swiftc`, assembles the `.app`, generates `AppIcon.icns`, signs with the fixed identity |
 | `scripts/reset-permission.sh` | Resets this app's Screen Recording / Accessibility TCC records |
@@ -203,6 +204,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 - 一键把前台窗口变浮窗（`⌃⌥P`），或从菜单栏窗口列表里挑。
 - 框选任意屏幕区域做画中画（`⌃⌥⇧P`）；选区落在某个窗口内时自动改用窗口流，可跟随窗口移动、被遮挡也能捕获。
 - 多个浮窗同时运行，自动错位摆放，位置与宽度按应用记忆。
+- 浮窗靠近屏幕边缘或其他浮窗时会自动吸附，相邻浮窗之间无间隔。磁吸只调整位置、不改变窗口大小；拖动时按住 `Control` 可临时跳过磁吸。
 - 浮窗置顶、可在所有 Space 与全屏应用之上显示、无边框、锁定宽高比；但层级低于系统下拉菜单，浮窗放右上角也不会挡住菜单栏工具的菜单。
 
 **缩放与平移**
@@ -305,7 +307,7 @@ bash scripts/build-app.sh --fast       # 只编当前架构，开发期更快
 bash scripts/build-app.sh --debug      # 带 DEBUG 日志与几何自检
 bash scripts/build-app.sh --install    # 顺带安装到 /Applications
 bash packaging/make-dmg.sh             # 生成 dist/MyWindowPip-<版本>.dmg + SHA256
-swift test                             # renderer 卡流与自愈状态机单元测试（需完整 Xcode）
+swift test                             # renderer 自愈与窗口磁吸单元测试（需完整 Xcode）
 ```
 
 内置自检（不开界面，改完代码跑一遍最省事）：
@@ -332,7 +334,7 @@ PR 与推送到 `main` 会在 macOS 14 上执行零警告编译和单元测试�
 | 路径 | 用途 |
 |---|---|
 | `Sources/my-window-pip/` | 全部 Swift 源码：捕获层（`CaptureEngine`、`ShareableContentStore`、`FrameGate`、`IdleDetector`）、展示层（`PiPWindowController`、`PiPContentView`、控制条与占位视图）、会话层（`PiPSession`、`SessionStore`）、输入层（热键、事件监听、悬停轮询、区域框选）、基础层（`Models`、`Geo`、`Preferences`、`Permissions`、`Updater`） |
-| `Tests/MyWindowPipTests/` | renderer 卡流检测与分级自愈的确定性单元测试 |
+| `Tests/MyWindowPipTests/` | renderer 自愈与窗口磁吸的确定性单元测试 |
 | `Resources/` | `Info.plist` 与 1024×1024 图标源文件 |
 | `scripts/build-app.sh` | 用 `swiftc` 编双架构、组装 `.app`、生成 `AppIcon.icns`、用固定身份签名 |
 | `scripts/reset-permission.sh` | 重置本应用的屏幕录制 / 辅助功能 TCC 记录 |

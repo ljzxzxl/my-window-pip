@@ -283,7 +283,7 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         self.levelMode = levelMode
 
         let frame = Self.initialFrame(aspect: safeAspect, width: initialWidth,
-                                     origin: origin, cascadeIndex: cascadeIndex)
+                                      origin: origin, cascadeIndex: cascadeIndex)
         panel = PiPPanel(
             contentRect: frame,
             styleMask: [.nonactivatingPanel, .borderless, .resizable, .fullSizeContentView],
@@ -418,7 +418,10 @@ final class PiPWindowController: NSObject, NSWindowDelegate, NSMenuDelegate {
         contentView.onRequestActivateSource = { [weak self] in
             self?.delegate?.pipRequestActivateSource()
         }
-        // 手动拖动结束：位置持久化 + 跨屏后按新 scale 重新出流（系统拖动时这两件事由 windowDidMove 做）
+        contentView.onResolveDraggedWindowFrame = { [weak self] proposed, flags in
+            self?.delegate?.pipResolveDragFrame(proposed, modifierFlags: flags) ?? proposed
+        }
+        // 手动拖动结束：位置持久化 + 再确认一次跨屏 scale
         contentView.onDidDragWindow = { [weak self] in
             guard let self else { return }
             self.delegate?.pipDidMove()
