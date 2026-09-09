@@ -1,6 +1,6 @@
 import AppKit
 
-/// 设置窗口：通用 / 热键 / 增强模式 / 关于。
+/// 设置窗口：通用 / 热键 / 增强模式 / Chromium 兼容 / 关于。
 /// 全部用代码构建（无 xib），改动即时生效。
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowController()
@@ -16,6 +16,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var clickToActivateHint: NSTextField?
     private var enhancedCheckbox: NSButton?
     private var launchAtLoginCheckbox: NSButton?
+    private var chromiumRuntimeStatusLabel: NSTextField?
 
     private let prefs = Preferences.shared
 
@@ -31,14 +32,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let tabView = NSTabView(frame: NSRect(x: 0, y: 0, width: 460, height: 330))
+        let tabView = NSTabView(frame: NSRect(x: 0, y: 0, width: 460, height: 400))
         tabView.addTabViewItem(makeTab(L.t("通用", "General"), view: makeGeneralView()))
         tabView.addTabViewItem(makeTab(L.t("热键", "Hotkeys"), view: makeHotkeyView()))
         tabView.addTabViewItem(makeTab(L.t("增强模式", "Enhanced"), view: makeEnhancedView()))
+        tabView.addTabViewItem(makeTab(L.t("Chromium 兼容", "Chromium"), view: makeChromiumCompatibilityView()))
         tabView.addTabViewItem(makeTab(L.t("关于", "About"), value: makeAboutView()))
 
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 430),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered, defer: false
         )
@@ -47,7 +49,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         w.isReleasedWhenClosed = false
         w.center()
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 360))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 430))
         tabView.frame = container.bounds.insetBy(dx: 10, dy: 10)
         tabView.autoresizingMask = [.width, .height]
         container.addSubview(tabView)
@@ -132,9 +134,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         stack.addArrangedSubview(hint(L.t(
             "帧率建议：看终端/日志 1–5 fps；看仪表盘 10–15 fps；看视频 30–60 fps。\n"
-                + "自动隐藏淡出后浮窗会点击穿透，此时按住 ⌥ 可临时唤回，或从菜单栏的浮窗子菜单里关掉。",
+                + "自动隐藏淡出后浮窗会点击穿透：按住 ⌥ 可临时唤回；按住 ⌘ 可直接框选放大；也可从菜单栏的浮窗子菜单里关掉。",
             "Suggested: 1–5 fps for terminals and logs, 10–15 fps for dashboards, 30–60 fps for video.\n"
-                + "A faded PiP window is click-through — hold ⌥ to peek, or turn auto-hide off from its menu bar submenu."
+                + "A faded PiP window is click-through: hold ⌥ to peek, or hold ⌘ to drag-select a zoom region; you can also disable auto-hide from its menu bar submenu."
         )))
         return wrap(stack)
     }
@@ -222,6 +224,59 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return wrap(stack)
     }
 
+    // MARK: - Chromium 兼容页
+
+    private func makeChromiumCompatibilityView() -> NSView {
+        let stack = verticalStack()
+        stack.addArrangedSubview(label(
+            L.t("Chromium 兼容模式", "Chromium Compatibility Mode"),
+            size: 15,
+            bold: true
+        ))
+
+        stack.addArrangedSubview(hint(L.t(
+            "部分 Chromium / Electron 应用在窗口进入其他 Space 后会主动暂停 repaint，"
+                + "导致 ScreenCaptureKit 只能保留最后一帧。兼容模式会用 Chromium 的后台绘制开关重启源应用，"
+                + "让窗口在离屏时继续绘制。",
+            "Some Chromium / Electron apps pause repainting when their windows move to another Space, "
+                + "leaving ScreenCaptureKit with only the last frame. Compatibility mode relaunches the source "
+                + "app with Chromium's background-rendering switch so it keeps rendering while offscreen."
+        )))
+
+        let chromiumPopup = NSPopUpButton()
+        for mode in ChromiumCompatibilityMode.allCases {
+            chromiumPopup.addItem(withTitle: mode.label)
+        }
+        chromiumPopup.selectItem(
+            at: ChromiumCompatibilityMode.allCases.firstIndex(of: prefs.chromiumCompatibilityMode) ?? 0
+        )
+        chromiumPopup.target = self
+        chromiumPopup.action = #selector(chromiumCompatibilityChanged(_:))
+        stack.addArrangedSubview(row(L.t("处理方式", "Behavior"), chromiumPopup))
+
+        let verifiedApps = SourceAppCompatibility.verifiedAppNames.joined(separator: ", ")
+        stack.addArrangedSubview(hint(L.t(
+            "询问：检测到 Chromium / Electron runtime 时先确认是否重启源应用。\n"
+                + "自动：检测命中后直接以兼容模式重启。\n"
+                + "关闭：不修改源应用启动方式。\n\n"
+                + "当前已人工验证：\(verifiedApps)。其它常见 Chromium / Electron 应用使用保守的 bundle 特征自动识别。",
+            "Ask: confirm before relaunching when a Chromium / Electron runtime is detected.\n"
+                + "Automatic: relaunch detected apps automatically in compatibility mode.\n"
+                + "Off: never change the source app launch mode.\n\n"
+                + "Currently verified: \(verifiedApps). Other common Chromium / Electron apps are detected conservatively from their app-bundle runtime signatures."
+        )))
+
+        let runtimeStatus = hint("")
+        chromiumRuntimeStatusLabel = runtimeStatus
+        stack.addArrangedSubview(runtimeStatus)
+
+        stack.addArrangedSubview(hint(L.t(
+            "注意：重启源应用可能中断未保存的工作。「询问」是默认且最安全的设置。兼容重启前会关闭该应用已有的 PiP，重启完成后不会自动重新创建。",
+            "Note: relaunching a source app can interrupt unsaved work. Ask is the default and safest setting. Existing PiP windows for that app are closed before relaunch and are not recreated automatically."
+        )))
+        return wrap(stack)
+    }
+
     // MARK: - 关于页
 
     private func makeAboutView() -> NSView {
@@ -275,6 +330,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         clickToActivateHint?.isHidden = granted || !prefs.clickToActivateSource
         enhancedCheckbox?.state = EventTapManager.shared.isEnabled ? .on : .off
         launchAtLoginCheckbox?.state = LoginItem.isEnabled ? .on : .off
+
+        let runtimeStatuses = SourceAppCompatibility.verifiedRuntimeStatuses()
+        if runtimeStatuses.isEmpty {
+            chromiumRuntimeStatusLabel?.stringValue = L.t(
+                "当前没有已验证的 Chromium 兼容应用在运行。",
+                "No verified Chromium compatibility app is currently running."
+            )
+        } else {
+            let lines = runtimeStatuses.map { status in
+                let state = status.isCompatible
+                    ? L.t("兼容参数已生效", "compatibility argument active")
+                    : L.t("普通启动", "normal launch")
+                return "\(status.appName) · PID \(status.pid) · \(state)"
+            }
+            chromiumRuntimeStatusLabel?.stringValue = lines.joined(separator: "\n")
+        }
     }
 
     private func reloadHotkeys() {
@@ -316,6 +387,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     @objc private func clickToActivateChanged(_ sender: NSButton) {
         prefs.clickToActivateSource = sender.state == .on
         refreshDynamicStates()
+    }
+
+    @objc private func chromiumCompatibilityChanged(_ sender: NSPopUpButton) {
+        let index = max(0, min(sender.indexOfSelectedItem, ChromiumCompatibilityMode.allCases.count - 1))
+        prefs.chromiumCompatibilityMode = ChromiumCompatibilityMode.allCases[index]
     }
 
     @objc private func launchAtLoginChanged(_ sender: NSButton) {

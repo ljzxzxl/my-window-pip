@@ -115,7 +115,7 @@ final class PlaceholderView: NSView {
     func update(runtimeState: SessionRuntimeState, source: CaptureSource) {
         self.runtimeState = runtimeState
 
-        guard runtimeState != .streaming else {
+        guard runtimeState != .streaming, runtimeState != .sourceOffscreen else {
             setVisible(false, animated: true)
             return
         }
@@ -149,6 +149,17 @@ final class PlaceholderView: NSView {
                 symbols: ["pause.circle"],
                 title: L.t("已暂停", "Paused"),
                 subtitle: L.t("点按浮窗或控制条继续", "Click the window or the controls to resume")
+            )
+
+        case .sourceOffscreen:
+            return Content(symbols: [], title: "", subtitle: "")
+
+        case .minimized:
+            return Content(
+                symbols: ["arrow.down.right.and.arrow.up.left.circle"],
+                title: L.t("源窗口已最小化", "Source window minimized"),
+                subtitle: L.t("恢复「\(source.displayTitle)」后会自动继续",
+                              "Restore \(source.displayTitle) to resume automatically")
             )
 
         case .waitingForSource:

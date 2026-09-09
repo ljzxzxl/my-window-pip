@@ -17,6 +17,51 @@ enum Geo {
         return (min(max(w, 2), 4096), min(max(h, 2), 4096))
     }
 
+    /// 窗口尺寸是否像「覆盖屏幕主体的主窗口」。
+    /// 用于全屏/最大化 App 的前台窗口选择：排除 1920×132 这类横向辅助 surface，
+    /// 但允许菜单栏/圆角/Stage Manager 带来的少量尺寸差异。
+    static func isScreenFillingWindow(size: CGSize, screenSizes: [CGSize]) -> Bool {
+        screenSizes.contains { screen in
+            guard screen.width > 1, screen.height > 1 else { return false }
+            let widthRatio = size.width / screen.width
+            let heightRatio = size.height / screen.height
+            return widthRatio >= 0.85 && widthRatio <= 1.05
+                && heightRatio >= 0.75 && heightRatio <= 1.05
+        }
+    }
+
+    /// 首次创建 PiP 时的默认宽度策略。
+    ///
+    /// 普通窗口沿用「源宽度的一半，320…640pt」；接近整屏的窗口（典型为全屏 App）
+    /// 用更紧凑的「源宽度四分之一，320…480pt」，避免 1920pt 全屏窗口直接生成 640pt 宽 PiP。
+    /// 已记忆宽度优先，但旧版本自动写入的 640pt 默认值在全屏场景下迁移到新默认。
+    static func initialPiPWidth(
+        sourceSize: CGSize,
+        rememberedWidth: CGFloat?,
+        screenSizes: [CGSize],
+        isWindowSource: Bool
+    ) -> CGFloat {
+        let legacyDefaultMax: CGFloat = 640
+        let fullscreenDefaultMax: CGFloat = 480
+        let isFullscreenLike = isWindowSource && screenSizes.contains { screen in
+            guard screen.width > 1, screen.height > 1 else { return false }
+            let widthRatio = sourceSize.width / screen.width
+            let heightRatio = sourceSize.height / screen.height
+            return widthRatio >= 0.97 && widthRatio <= 1.03
+                && heightRatio >= 0.97 && heightRatio <= 1.03
+        }
+
+        if isFullscreenLike {
+            if let rememberedWidth, abs(rememberedWidth - legacyDefaultMax) > 0.5 {
+                return rememberedWidth
+            }
+            return min(max(sourceSize.width / 4, 320), fullscreenDefaultMax)
+        }
+
+        if let rememberedWidth { return rememberedWidth }
+        return min(max(sourceSize.width / 2, 320), legacyDefaultMax)
+    }
+
     // MARK: - 缩放 / 平移
 
     static func clampZoom(_ zoom: CGFloat) -> CGFloat {
@@ -98,6 +143,35 @@ enum Geo {
         return uniformShrink ? nil : sampled
     }
 
+    /// 把带 padding 的 IOSurface 放进视图时，只让 `visibleRectPixels` 映射到 `bounds`；
+    /// padding 被放到父视图裁剪范围之外。`visibleRectPixels` 使用 SCK 的左上原点像素坐标。
+    ///
+    /// 这里分别按 X/Y 缩放，是为了吸收 SCK 在整数像素取整后产生的 1–2px 比例误差，
+    /// 避免 AVSampleBufferDisplayLayer 再次 letterbox 出细黑边。
+    static func displayLayerFrame(
+        bufferSize: CGSize,
+        visibleRectPixels: CGRect,
+        in bounds: CGRect
+    ) -> CGRect? {
+        guard bufferSize.width > 1, bufferSize.height > 1,
+              visibleRectPixels.width > 1, visibleRectPixels.height > 1,
+              bounds.width > 1, bounds.height > 1 else { return nil }
+
+        let surfaceBounds = CGRect(origin: .zero, size: bufferSize)
+        let visible = visibleRectPixels.intersection(surfaceBounds)
+        guard !visible.isNull, visible.width > 1, visible.height > 1 else { return nil }
+
+        let sx = bounds.width / visible.width
+        let sy = bounds.height / visible.height
+        let bottomPadding = bufferSize.height - visible.maxY
+        return CGRect(
+            x: bounds.minX - visible.minX * sx,
+            y: bounds.minY - bottomPadding * sy,
+            width: bufferSize.width * sx,
+            height: bufferSize.height * sy
+        )
+    }
+
     // MARK: - 视图 ↔ 源坐标
 
     /// `videoGravity = .resizeAspect` 下，内容在视图内实际占据的矩形（视图坐标，左下原点）。
@@ -112,6 +186,55 @@ enum Geo {
             y: bounds.minY + (bounds.height - size.height) / 2,
             width: size.width, height: size.height
         )
+    }
+
+    /// Cmd 框选矩形（视图左下原点）→ 当前可见画面内的归一化矩形（左上原点）。
+    /// 选区超出实际内容时先裁到内容范围；返回值可直接映射到当前 sourceRect。
+    static func visibleNormalizedRect(forSelection rect: CGRect, aspect: CGSize, bounds: CGRect) -> CGRect? {
+        let content = contentRect(aspect: aspect, in: bounds)
+        let sel = rect.intersection(content)
+        guard !sel.isNull, sel.width > 8, sel.height > 8,
+              content.width > 1, content.height > 1 else { return nil }
+        return CGRect(
+            x: (sel.minX - content.minX) / content.width,
+            y: 1 - (sel.maxY - content.minY) / content.height,
+            width: sel.width / content.width,
+            height: sel.height / content.height
+        )
+    }
+
+    /// 当前可见 sourceRect 内的归一化矩形（左上原点）→ 精确源坐标矩形。
+    static func sourceRect(fromNormalizedVisibleRect normalized: CGRect, within visible: CGRect) -> CGRect? {
+        let n = normalized.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+        guard !n.isNull, n.width > 0, n.height > 0,
+              visible.width > 1, visible.height > 1 else { return nil }
+        let mapped = CGRect(
+            x: visible.minX + n.minX * visible.width,
+            y: visible.minY + n.minY * visible.height,
+            width: n.width * visible.width,
+            height: n.height * visible.height
+        ).intersection(visible)
+        guard !mapped.isNull, mapped.width > 1, mapped.height > 1 else { return nil }
+        return mapped
+    }
+
+    /// 把一个旧基准矩形中的子区域按归一化位置映射到新基准矩形。
+    /// 源窗口 resize / 兼容重启后用它保持用户已框选区域的相对位置与比例。
+    static func remap(_ rect: CGRect, from oldBase: CGRect, to newBase: CGRect) -> CGRect? {
+        guard oldBase.width > 1, oldBase.height > 1,
+              newBase.width > 1, newBase.height > 1 else { return nil }
+        let nx = (rect.minX - oldBase.minX) / oldBase.width
+        let ny = (rect.minY - oldBase.minY) / oldBase.height
+        let nw = rect.width / oldBase.width
+        let nh = rect.height / oldBase.height
+        let mapped = CGRect(
+            x: newBase.minX + nx * newBase.width,
+            y: newBase.minY + ny * newBase.height,
+            width: nw * newBase.width,
+            height: nh * newBase.height
+        ).intersection(newBase)
+        guard !mapped.isNull, mapped.width > 1, mapped.height > 1 else { return nil }
+        return mapped
     }
 
     /// 视图坐标点（左下原点）→ 当前可见画面的归一化坐标（左上原点，0…1）。
@@ -131,23 +254,6 @@ enum Geo {
         let half = 1 / (2 * z)
         let a = clampAnchor(anchor, zoom: z)
         return CGPoint(x: a.x - half + p.x / z, y: a.y - half + p.y / z)
-    }
-
-    /// 视图内的框选矩形 → 新的 (zoom, anchor)。
-    static func zoomAndAnchor(forSelection rect: CGRect, aspect: CGSize, bounds: CGRect,
-                              currentZoom: CGFloat, currentAnchor: CGPoint) -> (CGFloat, CGPoint)? {
-        let content = contentRect(aspect: aspect, in: bounds)
-        let sel = rect.intersection(content)
-        guard sel.width > 8, sel.height > 8 else { return nil }
-        // 选区在当前可见画面中的归一化尺寸
-        let visW = sel.width / content.width
-        let centerVisible = CGPoint(
-            x: (sel.midX - content.minX) / content.width,
-            y: 1 - (sel.midY - content.minY) / content.height
-        )
-        let sourceCenter = visibleNormToSourceNorm(centerVisible, zoom: currentZoom, anchor: currentAnchor)
-        let newZoom = clampZoom(currentZoom / visW)
-        return (newZoom, clampAnchor(sourceCenter, zoom: newZoom))
     }
 
     // MARK: - AppKit ↔ SCK 坐标

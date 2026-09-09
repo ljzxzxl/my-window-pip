@@ -378,10 +378,16 @@ final class OverlayControlsView: NSView {
         setHintText(state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause"), for: pauseButton)
         pauseButton.setAccessibilityLabel(state.isPaused ? L.t("继续", "Resume") : L.t("暂停", "Pause"))
 
-        // 复位缩放：仅放大状态可用
+        // 复位：滚轮放大或 Cmd 框选任意比例后都可用。
         let zoomed = state.zoom > 1.001
-        resetZoomButton.isEnabled = zoomed
-        setTintRole(zoomed ? .inactive : .disabled, for: resetZoomButton)
+        let resettable = zoomed || state.hasSelectionCrop
+        resetZoomButton.isEnabled = resettable
+        setTintRole(resettable ? .inactive : .disabled, for: resetZoomButton)
+        let resetHint = state.hasSelectionCrop
+            ? L.t("恢复完整画面与原始比例", "Restore full frame and original aspect ratio")
+            : L.t("复位缩放", "Reset zoom")
+        setHintText(resetHint, for: resetZoomButton)
+        resetZoomButton.setAccessibilityLabel(resetHint)
 
         // 自动隐藏：开 → eye.slash（鼠标移入会淡出）
         autoHideButton.image = Self.symbolImage(
@@ -406,9 +412,12 @@ final class OverlayControlsView: NSView {
             offLabel: L.t("静止检测：关", "Idle detection: off")
         )
 
-        // 倍率标签
+        // 倍率 / 裁剪标签
         if zoomed {
             zoomLabel.stringValue = String(format: "%.1f×", Double(state.zoom))
+            zoomLabel.isHidden = false
+        } else if state.hasSelectionCrop {
+            zoomLabel.stringValue = L.t("选区", "Crop")
             zoomLabel.isHidden = false
         } else {
             zoomLabel.stringValue = ""
