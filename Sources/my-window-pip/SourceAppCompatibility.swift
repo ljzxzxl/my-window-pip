@@ -28,6 +28,29 @@ enum SourceAppCompatibility {
         let hasICUData: Bool
     }
 
+    /// 命中兼容检测后该怎么处理源应用。
+    enum RelaunchDecision: Equatable {
+        /// 不动源应用，直接按普通流程创建 PiP。
+        case skip
+        /// 先问用户。
+        case ask
+        /// 直接以兼容参数重启。
+        case relaunch
+    }
+
+    /// 重启会退出用户正在使用的应用，因此「自动」只对已人工验证的 App 生效；
+    /// 靠 bundle 特征识别出来的 Chromium / Electron 应用一律先询问。
+    static func relaunchDecision(
+        mode: ChromiumCompatibilityMode,
+        isVerified: Bool
+    ) -> RelaunchDecision {
+        switch mode {
+        case .off: return .skip
+        case .ask: return .ask
+        case .automatic: return isVerified ? .relaunch : .ask
+        }
+    }
+
     enum RestartError: LocalizedError {
         case applicationURLUnavailable
         case terminationRejected
@@ -120,6 +143,12 @@ enum SourceAppCompatibility {
         return signature.hasRendererHelper && signature.hasResourcesPak && signature.hasICUData
     }
 
+    /// 遍历 Frameworks 时的最大访问条目数。
+    ///
+    /// 命中 Chromium / Electron 特征通常只需要几十个条目就能提前 break；这个上限保证
+    /// 面对 Frameworks 特别庞大的非 Chromium 应用时，主线程上的探测也不会无界展开。
+    private static let bundleScanEntryLimit = 4000
+
     private static func isChromiumLikeBundle(_ bundleURL: URL, cacheKey: String) -> Bool {
         if let cached = chromiumDetectionCache[cacheKey] { return cached }
         let fm = FileManager.default
@@ -135,9 +164,11 @@ enum SourceAppCompatibility {
         if let enumerator = fm.enumerator(
             at: frameworks,
             includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) {
+            var visited = 0
             for case let url as URL in enumerator {
+                visited += 1
                 switch url.lastPathComponent {
                 case let name where name.hasSuffix("Helper (Renderer).app"):
                     rendererHelper = true
@@ -149,6 +180,10 @@ enum SourceAppCompatibility {
                     break
                 }
                 if rendererHelper && resourcesPak && icuData { break }
+                if visited >= bundleScanEntryLimit {
+                    Log.debug("Chromium 特征探测提前结束：条目超过 \(bundleScanEntryLimit)")
+                    break
+                }
             }
         }
 
@@ -258,7 +293,7 @@ enum SourceAppCompatibility {
             // 连续约 1 秒保持同一主 PID 且兼容参数仍在，才认定为最终稳定进程并记录。
             if ticks >= 4 {
                 UserDefaults.standard.set(Int(pid), forKey: compatibilityPIDKey(profile.bundleID))
-                Log.info("Chromium 兼容进程已稳定：\(profile.appName) pid=\(pid)")
+                Log.debug("Chromium 兼容进程已稳定：\(profile.appName) pid=\(pid)")
                 completion(.success(application))
                 return
             }

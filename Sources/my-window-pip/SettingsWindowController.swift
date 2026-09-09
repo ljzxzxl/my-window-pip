@@ -256,14 +256,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let verifiedApps = SourceAppCompatibility.verifiedAppNames.joined(separator: ", ")
         stack.addArrangedSubview(hint(L.t(
-            "询问：检测到 Chromium / Electron runtime 时先确认是否重启源应用。\n"
-                + "自动：检测命中后直接以兼容模式重启。\n"
-                + "关闭：不修改源应用启动方式。\n\n"
-                + "当前已人工验证：\(verifiedApps)。其它常见 Chromium / Electron 应用使用保守的 bundle 特征自动识别。",
-            "Ask: confirm before relaunching when a Chromium / Electron runtime is detected.\n"
-                + "Automatic: relaunch detected apps automatically in compatibility mode.\n"
-                + "Off: never change the source app launch mode.\n\n"
-                + "Currently verified: \(verifiedApps). Other common Chromium / Electron apps are detected conservatively from their app-bundle runtime signatures."
+            "关闭（默认）：不修改源应用启动方式。\n"
+                + "询问：检测到 Chromium / Electron runtime 时先确认是否重启源应用。\n"
+                + "自动（仅已验证应用）：只有已人工验证的应用会直接重启，其它识别到的应用仍会询问。\n\n"
+                + "重启会退出并重新启动源应用，请先保存工作。当前已人工验证：\(verifiedApps)。"
+                + "其它常见 Chromium / Electron 应用使用保守的 bundle 特征自动识别。",
+            "Off (default): never change the source app launch mode.\n"
+                + "Ask: confirm before relaunching when a Chromium / Electron runtime is detected.\n"
+                + "Automatic (verified apps only): relaunch verified apps directly; anything detected "
+                + "heuristically still asks first.\n\n"
+                + "Relaunching quits and restarts the source app, so save your work first. "
+                + "Currently verified: \(verifiedApps). Other common Chromium / Electron apps are detected "
+                + "conservatively from their app-bundle runtime signatures."
         )))
 
         let runtimeStatus = hint("")

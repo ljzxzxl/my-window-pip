@@ -55,6 +55,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 - Idle detection drops to 1 fps when nothing changes and restores instantly when it does.
 - Streaming pauses automatically when the PiP window is fully occluded or on an inactive Space.
 - Frame rate, resolution and crop changes go through `SCStream.updateConfiguration` — no stream rebuild, no black frames.
+- Chromium compatibility mode (off by default): some Chromium / Electron apps stop repainting once their window moves to another Space, so ScreenCaptureKit only sees the last frame. When enabled, MyWindowPip offers to relaunch the source app with Chromium's background-rendering switch. Relaunching quits the app, so it always asks first — only apps verified by this project can be relaunched automatically.
 
 **Interaction**
 - A dimmed overlay with an arrow points at the menu bar icon on first launch, so it is obvious the app is running in the background; replay it any time from *Show Getting Started*.
@@ -217,6 +218,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 - 静止检测：画面无变化自动降到 1 fps，一有变化立刻恢复。
 - 浮窗被完全遮挡或所在 Space 不可见时自动暂停拉流。
 - 改帧率、改分辨率、改裁剪都走 `SCStream.updateConfiguration`，不重建流、无黑帧。
+- Chromium 兼容模式（默认关闭）：部分 Chromium / Electron 应用的窗口进入其他 Space 后会主动停止 repaint，ScreenCaptureKit 只能拿到最后一帧。开启后 MyWindowPip 会询问是否用 Chromium 的后台绘制开关重启源应用。重启会退出该应用，因此默认先询问；只有本项目已人工验证的应用才允许自动重启。
 
 **交互**
 - 首次启动有一层遮罩 + 箭头引导指向菜单栏图标，明确告知「应用已在后台运行、入口在这里」；之后可从菜单栏「显示上手引导」重看。

@@ -124,10 +124,13 @@ final class SessionStore {
                   profile, pid: application.processIdentifier
               ) else { return false }
 
-        switch Preferences.shared.chromiumCompatibilityMode {
-        case .off:
+        switch SourceAppCompatibility.relaunchDecision(
+            mode: Preferences.shared.chromiumCompatibilityMode,
+            isVerified: profile.isVerified
+        ) {
+        case .skip:
             return false
-        case .automatic:
+        case .relaunch:
             startCompatibilityRelaunch(application: application, profile: profile)
             return true
         case .ask:
@@ -172,7 +175,8 @@ final class SessionStore {
         // 源应用重启会让旧 windowID 全部失效；与其在源应用恢复时自动把 PiP 接回并挡住
         // 新窗口左上角，不如在重启前主动关闭该应用的窗口 PiP。重启成功后由用户按需重新创建。
         closeWindowSessions(bundleID: profile.bundleID)
-        Log.info("以 Chromium 兼容模式重启源应用；已关闭现有 PiP：\(profile.appName)")
+        // 记录到 debug 级别：info 会进常驻日志，没必要长期留存用户在跑哪些应用。
+        Log.debug("以 Chromium 兼容模式重启源应用；已关闭现有 PiP：\(profile.appName)")
 
         SourceAppCompatibility.restart(application: application, profile: profile) { [weak self] result in
             guard let self else { return }

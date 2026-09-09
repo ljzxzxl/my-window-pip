@@ -77,16 +77,18 @@ enum KeyCodeNames {
 }
 
 /// Chromium / Electron 源应用的已验证离屏渲染兼容策略。
+///
+/// 默认关闭：重启源应用会打断用户正在使用的浏览器 / 编辑器，属于需要主动选择的操作。
 enum ChromiumCompatibilityMode: String, CaseIterable {
+    case off
     case ask
     case automatic
-    case off
 
     var label: String {
         switch self {
-        case .ask: return L.t("询问", "Ask")
-        case .automatic: return L.t("自动", "Automatic")
         case .off: return L.t("关闭", "Off")
+        case .ask: return L.t("询问", "Ask")
+        case .automatic: return L.t("自动（仅已验证应用）", "Automatic (verified apps only)")
         }
     }
 }
@@ -135,7 +137,7 @@ final class Preferences {
             K.showsCursor: false,
             K.hasSeenOnboarding: false,
             K.clickToActivateSource: true,
-            K.chromiumCompatibilityMode: ChromiumCompatibilityMode.ask.rawValue,
+            K.chromiumCompatibilityMode: ChromiumCompatibilityMode.off.rawValue,
         ])
     }
 
@@ -216,12 +218,12 @@ final class Preferences {
         set { d.set(newValue, forKey: K.clickToActivateSource) }
     }
 
-    /// 对已验证 Chromium / Electron 源应用的兼容重启策略。
+    /// 对 Chromium / Electron 源应用的兼容重启策略；非法值一律回退到最保守的关闭。
     var chromiumCompatibilityMode: ChromiumCompatibilityMode {
         get {
             ChromiumCompatibilityMode(
                 rawValue: d.string(forKey: K.chromiumCompatibilityMode) ?? ""
-            ) ?? .ask
+            ) ?? .off
         }
         set { d.set(newValue.rawValue, forKey: K.chromiumCompatibilityMode) }
     }

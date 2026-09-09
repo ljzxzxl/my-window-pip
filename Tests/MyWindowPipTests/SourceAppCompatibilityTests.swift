@@ -137,4 +137,57 @@ final class SourceAppCompatibilityTests: XCTestCase {
             XCTAssertEqual(prefs.chromiumCompatibilityMode, mode)
         }
     }
+
+    func testRelaunchDecisionNeverTouchesSourceAppWhenOff() {
+        XCTAssertEqual(
+            SourceAppCompatibility.relaunchDecision(mode: .off, isVerified: true),
+            .skip
+        )
+        XCTAssertEqual(
+            SourceAppCompatibility.relaunchDecision(mode: .off, isVerified: false),
+            .skip
+        )
+    }
+
+    func testRelaunchDecisionAlwaysAsksInAskMode() {
+        XCTAssertEqual(
+            SourceAppCompatibility.relaunchDecision(mode: .ask, isVerified: true),
+            .ask
+        )
+        XCTAssertEqual(
+            SourceAppCompatibility.relaunchDecision(mode: .ask, isVerified: false),
+            .ask
+        )
+    }
+
+    func testAutomaticRelaunchIsLimitedToVerifiedApps() {
+        XCTAssertEqual(
+            SourceAppCompatibility.relaunchDecision(mode: .automatic, isVerified: true),
+            .relaunch
+        )
+        // 靠 bundle 特征识别出来的应用（VSCode、Slack 之类）不能被静默重启。
+        XCTAssertEqual(
+            SourceAppCompatibility.relaunchDecision(mode: .automatic, isVerified: false),
+            .ask
+        )
+    }
+
+    func testCompatibilityDefaultsToOff() {
+        let suiteName = "SourceAppCompatibilityTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(Preferences(defaults: defaults).chromiumCompatibilityMode, .off)
+    }
+
+    func testUnknownStoredCompatibilityModeFallsBackToOff() {
+        let suiteName = "SourceAppCompatibilityTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("something-else", forKey: "chromiumCompatibilityMode")
+
+        XCTAssertEqual(Preferences(defaults: defaults).chromiumCompatibilityMode, .off)
+    }
 }
