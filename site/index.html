@@ -1,15 +1,78 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0b63f6">
+  <meta name="theme-color" content="#071329" data-theme-color>
   <meta name="description" data-i18n-content="pageDescription" content="MyWindowPip：把任意 macOS 窗口或屏幕区域放进轻量、始终可见的 PiP 浮窗。">
   <link rel="icon" type="image/png" sizes="512x512" href="assets/my-window-pip-icon.png">
   <link rel="apple-touch-icon" sizes="512x512" href="assets/my-window-pip-icon.png">
   <title data-i18n="pageTitle">MyWindowPip — macOS 任意窗口画中画</title>
   <style>
     :root {
+      color-scheme: dark;
+      --page: #071329;
+      --surface: #0d1d3a;
+      --surface-blue: #102b57;
+      --ink: #f5f8ff;
+      --muted: #a9bbd6;
+      --blue: #4b9bff;
+      --blue-deep: #8bc5ff;
+      --sky: #63d8ff;
+      --navy: #06102a;
+      --line: rgba(150, 195, 255, 0.2);
+      --line-strong: rgba(150, 195, 255, 0.38);
+      --focus: #8ed7ff;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+      --page-glow-primary: rgba(99, 216, 255, 0.14);
+      --page-glow-secondary: rgba(75, 155, 255, 0.12);
+      --accent-ink: #061329;
+      --accent-shadow: rgba(75, 155, 255, 0.3);
+      --control-surface: rgba(255, 255, 255, 0.06);
+      --control-surface-hover: rgba(255, 255, 255, 0.12);
+      --secondary-surface: rgba(255, 255, 255, 0.06);
+      --secondary-surface-hover: rgba(255, 255, 255, 0.12);
+      --panel-shadow: 0 12px 35px rgba(0, 0, 0, 0.22);
+      --proof-surface: rgba(13, 29, 58, 0.88);
+      --workflow-surface: rgba(13, 29, 58, 0.92);
+      --capability-base: #0d1d3a;
+      --capability-two-start: #102b57;
+      --capability-two-end: #0d1d3a;
+      --capability-three-start: #0d1d3a;
+      --capability-three-end: #103455;
+      --tag-ink: #b9d8ff;
+      --trust-start: #061639;
+      --trust-end: #0b4cb7;
+      --trust-glow: rgba(99, 216, 255, 0.3);
+      --trust-ink: #ffffff;
+      --trust-kicker: #9cddff;
+      --trust-muted: rgba(255, 255, 255, 0.75);
+      --trust-border: rgba(255, 255, 255, 0.16);
+      --trust-surface: rgba(255, 255, 255, 0.08);
+      --trust-list-muted: rgba(255, 255, 255, 0.66);
+      --trust-shadow: 0 28px 68px rgba(0, 0, 0, 0.34);
+      --download-start: #102b57;
+      --download-end: #0d1d3a;
+      --download-facts: #b3c7e1;
+      --code-surface: #102b57;
+      --code-ink: #b9dcff;
+      --demo-caption: #b8c9e1;
+      --demo-caption-muted: #8fa7c8;
+      --mock-window-background: #f7faff;
+      --mock-window-bar: #e7eef9;
+      --mock-window-title: #50647f;
+      --mock-window-body: #0c2a5a;
+      --mock-window-overline: #5383c8;
+      --mock-window-heading: #b5c9e8;
+      --mock-window-line: #d8e4f5;
+      --mock-window-progress-track: #dce8f7;
+      --max-width: 1180px;
+      --radius-xl: 36px;
+      --radius-lg: 24px;
+      --radius-md: 16px;
+    }
+
+    html[data-theme="light"] {
       color-scheme: light;
       --page: #f4f7ff;
       --surface: #ffffff;
@@ -24,10 +87,48 @@
       --line-strong: rgba(18, 79, 169, 0.28);
       --focus: #003fba;
       --shadow: 0 24px 70px rgba(17, 65, 144, 0.14);
-      --max-width: 1180px;
-      --radius-xl: 36px;
-      --radius-lg: 24px;
-      --radius-md: 16px;
+      --page-glow-primary: rgba(89, 200, 255, 0.2);
+      --page-glow-secondary: rgba(11, 99, 246, 0.08);
+      --accent-ink: #ffffff;
+      --accent-shadow: rgba(11, 99, 246, 0.23);
+      --control-surface: rgba(255, 255, 255, 0.62);
+      --control-surface-hover: #ffffff;
+      --secondary-surface: rgba(255, 255, 255, 0.52);
+      --secondary-surface-hover: #ffffff;
+      --panel-shadow: 0 12px 35px rgba(17, 65, 144, 0.06);
+      --proof-surface: rgba(255, 255, 255, 0.72);
+      --workflow-surface: rgba(255, 255, 255, 0.74);
+      --capability-base: #ffffff;
+      --capability-two-start: #edf5ff;
+      --capability-two-end: #ffffff;
+      --capability-three-start: #ffffff;
+      --capability-three-end: #e8f8ff;
+      --tag-ink: #2b5b9d;
+      --trust-start: #061639;
+      --trust-end: #0b4cb7;
+      --trust-glow: rgba(89, 200, 255, 0.3);
+      --trust-ink: #ffffff;
+      --trust-kicker: #9cddff;
+      --trust-muted: rgba(255, 255, 255, 0.75);
+      --trust-border: rgba(255, 255, 255, 0.16);
+      --trust-surface: rgba(255, 255, 255, 0.08);
+      --trust-list-muted: rgba(255, 255, 255, 0.66);
+      --trust-shadow: 0 28px 68px rgba(5, 45, 121, 0.24);
+      --download-start: rgba(255, 255, 255, 0.95);
+      --download-end: rgba(232, 242, 255, 0.92);
+      --download-facts: #486383;
+      --code-surface: #e7eef9;
+      --code-ink: #164a9b;
+      --demo-caption: #436080;
+      --demo-caption-muted: #6d7f98;
+      --mock-window-background: #f7faff;
+      --mock-window-bar: #e7eef9;
+      --mock-window-title: #50647f;
+      --mock-window-body: #0c2a5a;
+      --mock-window-overline: #5383c8;
+      --mock-window-heading: #b5c9e8;
+      --mock-window-line: #d8e4f5;
+      --mock-window-progress-track: #dce8f7;
     }
 
     *,
@@ -38,6 +139,7 @@
 
     html {
       scroll-behavior: smooth;
+      background: var(--page);
     }
 
     body {
@@ -45,8 +147,8 @@
       margin: 0;
       overflow-x: hidden;
       background:
-        radial-gradient(circle at 88% 4%, rgba(89, 200, 255, 0.2), transparent 24rem),
-        radial-gradient(circle at 2% 34%, rgba(11, 99, 246, 0.08), transparent 28rem),
+        radial-gradient(circle at 88% 4%, var(--page-glow-primary), transparent 24rem),
+        radial-gradient(circle at 2% 34%, var(--page-glow-secondary), transparent 28rem),
         var(--page);
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
@@ -103,7 +205,7 @@
       width: 36px;
       height: 36px;
       border-radius: 10px;
-      box-shadow: 0 7px 18px rgba(11, 99, 246, 0.25);
+      box-shadow: 0 7px 18px var(--accent-shadow);
     }
 
     .brand-wordmark {
@@ -150,9 +252,9 @@
       min-height: 42px;
       padding: 0 18px;
       background: var(--blue);
-      color: #fff;
+      color: var(--accent-ink);
       font-size: 0.86rem;
-      box-shadow: 0 9px 22px rgba(11, 99, 246, 0.23);
+      box-shadow: 0 9px 22px var(--accent-shadow);
     }
 
     .language-switch {
@@ -162,11 +264,54 @@
       padding: 3px;
       border: 1px solid var(--line-strong);
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.62);
+      background: var(--control-surface);
     }
 
-    .language-switch[hidden] {
+    .language-switch[hidden],
+    .theme-switch[hidden] {
       display: none;
+    }
+
+    .theme-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--control-surface);
+      flex: 0 0 auto;
+    }
+
+    .theme-button {
+      min-height: 32px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.73rem;
+      font-weight: 800;
+      line-height: 1;
+      white-space: nowrap;
+      transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .theme-button:hover {
+      background: var(--control-surface-hover);
+      color: var(--blue-deep);
+    }
+
+    .theme-button.is-active {
+      background: var(--blue);
+      color: var(--accent-ink);
+      box-shadow: 0 5px 13px var(--accent-shadow);
+    }
+
+    .theme-button.is-active:hover {
+      color: var(--accent-ink);
     }
 
     .language-button {
@@ -190,18 +335,19 @@
 
     .language-button.is-active {
       background: var(--blue);
-      color: #fff;
-      box-shadow: 0 5px 13px rgba(11, 99, 246, 0.2);
+      color: var(--accent-ink);
+      box-shadow: 0 5px 13px var(--accent-shadow);
     }
 
     .language-button.is-active:hover {
-      color: #fff;
+      color: var(--accent-ink);
     }
 
     .header-cta:hover,
     .button-primary:hover {
       background: var(--blue-deep);
-      box-shadow: 0 13px 28px rgba(11, 99, 246, 0.28);
+      box-shadow: 0 13px 28px var(--accent-shadow);
+      color: var(--accent-ink);
       transform: translateY(-2px);
     }
 
@@ -302,18 +448,18 @@
 
     .button-primary {
       background: var(--blue);
-      color: #fff;
-      box-shadow: 0 12px 25px rgba(11, 99, 246, 0.22);
+      color: var(--accent-ink);
+      box-shadow: 0 12px 25px var(--accent-shadow);
     }
 
     .button-secondary {
       border-color: var(--line-strong);
-      background: rgba(255, 255, 255, 0.52);
+      background: var(--secondary-surface);
       color: var(--ink);
     }
 
     .button-secondary:hover {
-      background: #fff;
+      background: var(--secondary-surface-hover);
       border-color: var(--blue);
       transform: translateY(-2px);
     }
@@ -364,7 +510,7 @@
       background:
         linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.07)),
         linear-gradient(135deg, #0752d5, #0c8cf1 54%, #63d4ff);
-      box-shadow: 0 28px 75px rgba(12, 83, 187, 0.27);
+      box-shadow: 0 28px 75px var(--accent-shadow);
       isolation: isolate;
     }
 
@@ -466,7 +612,7 @@
       width: 68%;
       height: 270px;
       border-radius: 17px;
-      background: #f7faff;
+      background: var(--mock-window-background);
       animation: source-breathe 7s ease-in-out infinite;
     }
 
@@ -476,7 +622,7 @@
       gap: 6px;
       height: 30px;
       padding: 0 12px;
-      background: #e7eef9;
+      background: var(--mock-window-bar);
     }
 
     .window-bar i {
@@ -491,19 +637,19 @@
 
     .window-title {
       margin-left: 7px;
-      color: #50647f;
+      color: var(--mock-window-title);
       font-size: 0.65rem;
       font-weight: 750;
     }
 
     .source-body {
       padding: 22px 24px;
-      color: #0c2a5a;
+      color: var(--mock-window-body);
     }
 
     .source-overline {
       margin-bottom: 12px;
-      color: #5383c8;
+      color: var(--mock-window-overline);
       font-size: 0.62rem;
       font-weight: 800;
       letter-spacing: 0.14em;
@@ -515,7 +661,7 @@
       height: 19px;
       margin-bottom: 17px;
       border-radius: 7px;
-      background: #b5c9e8;
+      background: var(--mock-window-heading);
     }
 
     .source-lines {
@@ -527,7 +673,7 @@
       display: block;
       height: 9px;
       border-radius: 7px;
-      background: #d8e4f5;
+      background: var(--mock-window-line);
     }
 
     .source-lines span:nth-child(1) { width: 91%; }
@@ -541,7 +687,7 @@
       margin-top: 27px;
       overflow: hidden;
       border-radius: 9px;
-      background: #dce8f7;
+      background: var(--mock-window-progress-track);
     }
 
     .source-progress::before {
@@ -646,7 +792,7 @@
       justify-content: space-between;
       gap: 8px 18px;
       margin: 14px 4px 0;
-      color: #436080;
+      color: var(--demo-caption);
       font-size: 0.78rem;
     }
 
@@ -656,7 +802,7 @@
     }
 
     .demo-caption span {
-      color: #6d7f98;
+      color: var(--demo-caption-muted);
     }
 
     .proof-strip {
@@ -668,13 +814,13 @@
       border: 1px solid var(--line);
       border-radius: var(--radius-lg);
       background: var(--line);
-      box-shadow: 0 12px 35px rgba(17, 65, 144, 0.06);
+      box-shadow: var(--panel-shadow);
     }
 
     .proof-item {
       min-height: 94px;
       padding: 22px 24px;
-      background: rgba(255, 255, 255, 0.72);
+      background: var(--proof-surface);
     }
 
     .proof-item strong,
@@ -740,7 +886,7 @@
       position: relative;
       min-height: 258px;
       padding: 30px;
-      background: rgba(255, 255, 255, 0.74);
+      background: var(--workflow-surface);
     }
 
     .workflow-step:not(:last-child)::after {
@@ -766,10 +912,10 @@
       margin-bottom: 34px;
       border-radius: 13px;
       background: var(--blue);
-      color: #fff;
+      color: var(--accent-ink);
       font-size: 0.82rem;
       font-weight: 850;
-      box-shadow: 0 9px 20px rgba(11, 99, 246, 0.23);
+      box-shadow: 0 9px 20px var(--accent-shadow);
     }
 
     .workflow-step p,
@@ -809,16 +955,16 @@
       padding: 28px;
       border: 1px solid var(--line);
       border-radius: var(--radius-lg);
-      background: #fff;
-      box-shadow: 0 12px 34px rgba(17, 65, 144, 0.06);
+      background: var(--capability-base);
+      box-shadow: var(--panel-shadow);
     }
 
     .capability:nth-child(2) {
-      background: linear-gradient(155deg, #edf5ff, #fff);
+      background: linear-gradient(155deg, var(--capability-two-start), var(--capability-two-end));
     }
 
     .capability:nth-child(3) {
-      background: linear-gradient(155deg, #fff, #e8f8ff);
+      background: linear-gradient(155deg, var(--capability-three-start), var(--capability-three-end));
     }
 
     .capability-number {
@@ -841,7 +987,7 @@
       padding: 5px 9px;
       border-radius: 999px;
       background: var(--surface-blue);
-      color: #2b5b9d;
+      color: var(--tag-ink);
       font-size: 0.68rem;
       font-weight: 750;
     }
@@ -853,18 +999,18 @@
       padding: clamp(34px, 6vw, 70px);
       border-radius: var(--radius-xl);
       background:
-        radial-gradient(circle at 88% 18%, rgba(89, 200, 255, 0.3), transparent 20rem),
-        linear-gradient(135deg, #061639, #0b4cb7);
-      color: #fff;
-      box-shadow: 0 28px 68px rgba(5, 45, 121, 0.24);
+        radial-gradient(circle at 88% 18%, var(--trust-glow), transparent 20rem),
+        linear-gradient(135deg, var(--trust-start), var(--trust-end));
+      color: var(--trust-ink);
+      box-shadow: var(--trust-shadow);
     }
 
     .trust-panel .section-kicker {
-      color: #9cddff;
+      color: var(--trust-kicker);
     }
 
     .trust-panel .section-kicker::before {
-      background: #9cddff;
+      background: var(--trust-kicker);
     }
 
     .trust-panel h2 {
@@ -873,7 +1019,7 @@
     }
 
     .trust-panel p {
-      color: rgba(255, 255, 255, 0.75);
+      color: var(--trust-muted);
     }
 
     .trust-list {
@@ -888,9 +1034,9 @@
     .trust-list li {
       min-height: 124px;
       padding: 19px;
-      border: 1px solid rgba(255, 255, 255, 0.16);
+      border: 1px solid var(--trust-border);
       border-radius: var(--radius-md);
-      background: rgba(255, 255, 255, 0.08);
+      background: var(--trust-surface);
     }
 
     .trust-list strong,
@@ -904,7 +1050,7 @@
     }
 
     .trust-list span {
-      color: rgba(255, 255, 255, 0.66);
+      color: var(--trust-list-muted);
       font-size: 0.78rem;
     }
 
@@ -923,7 +1069,7 @@
       border: 1px solid var(--line-strong);
       border-radius: var(--radius-xl);
       background:
-        linear-gradient(110deg, rgba(255, 255, 255, 0.95), rgba(232, 242, 255, 0.92)),
+        linear-gradient(110deg, var(--download-start), var(--download-end)),
         var(--surface);
       box-shadow: var(--shadow);
     }
@@ -951,7 +1097,7 @@
       flex-wrap: wrap;
       gap: 8px 18px;
       grid-column: 1 / -1;
-      color: #486383;
+      color: var(--download-facts);
       font-size: 0.78rem;
       font-weight: 700;
     }
@@ -973,8 +1119,8 @@
     code {
       padding: 2px 5px;
       border-radius: 5px;
-      background: #e7eef9;
-      color: #164a9b;
+      background: var(--code-surface);
+      color: var(--code-ink);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.9em;
     }
@@ -1090,11 +1236,16 @@
     @media (max-width: 760px) {
       .site-header {
         flex-wrap: wrap;
+        row-gap: 14px;
         padding: 17px 0;
       }
 
       .language-switch {
         margin-left: auto;
+      }
+
+      .theme-switch {
+        margin-left: 0;
       }
 
       .site-nav {
@@ -1208,7 +1359,8 @@
         font-size: 0.78rem;
       }
 
-      .language-button {
+      .language-button,
+      .theme-button {
         min-height: 30px;
         padding-inline: 8px;
         font-size: 0.7rem;
@@ -1376,6 +1528,10 @@
     <div class="language-switch" data-language-switch data-i18n-aria-label="languageSwitchLabel" hidden role="group" aria-label="语言切换">
       <button class="language-button is-active" type="button" data-language="zh" aria-pressed="true" lang="zh-CN">中文</button>
       <button class="language-button" type="button" data-language="en" aria-pressed="false" lang="en">EN</button>
+    </div>
+    <div class="theme-switch" data-theme-switch data-i18n-aria-label="themeSwitchLabel" hidden role="group" aria-label="主题切换">
+      <button class="theme-button is-active" type="button" data-theme-option="dark" aria-pressed="true" data-i18n="themeDark">深色</button>
+      <button class="theme-button" type="button" data-theme-option="light" aria-pressed="false" data-i18n="themeLight">浅色</button>
     </div>
     <a class="header-cta" href="https://github.com/ljzxzxl/my-window-pip/releases/download/v0.1.6/MyWindowPip-0.1.6.dmg"><span data-i18n="headerDownload">下载</span> v0.1.6</a>
   </header>
@@ -1545,6 +1701,9 @@
         brandHomeLabel: "MyWindowPip 首页",
         mainNavLabel: "主导航",
         languageSwitchLabel: "语言切换",
+        themeSwitchLabel: "主题切换",
+        themeDark: "深色",
+        themeLight: "浅色",
         navHowItWorks: "怎么用",
         navFeatures: "能力",
         navPrivacy: "权限与隐私",
@@ -1628,6 +1787,9 @@
         brandHomeLabel: "MyWindowPip home",
         mainNavLabel: "Main navigation",
         languageSwitchLabel: "Language",
+        themeSwitchLabel: "Theme",
+        themeDark: "Dark",
+        themeLight: "Light",
         navHowItWorks: "How it works",
         navFeatures: "Features",
         navPrivacy: "Permissions & privacy",
@@ -1709,13 +1871,19 @@
 
     const languageSwitch = document.querySelector("[data-language-switch]");
     const languageButtons = [...document.querySelectorAll("[data-language]")];
+    const themeSwitch = document.querySelector("[data-theme-switch]");
+    const themeButtons = [...document.querySelectorAll("[data-theme-option]")];
     const translatableElements = [...document.querySelectorAll("[data-i18n]")];
     const contentAttributes = [...document.querySelectorAll("[data-i18n-content]")];
     const ariaLabels = [...document.querySelectorAll("[data-i18n-aria-label]")];
 
+    let currentLanguage = "zh";
+    let currentTheme = "dark";
+
     function applyLanguage(language) {
-      const selected = translations[language] ? language : "zh";
+      const selected = language === "en" ? "en" : "zh";
       const dictionary = translations[selected];
+      currentLanguage = selected;
 
       translatableElements.forEach((element) => {
         const value = dictionary[element.dataset.i18n];
@@ -1740,10 +1908,36 @@
       if (languageSwitch) languageSwitch.hidden = false;
     }
 
+    function applyTheme(theme) {
+      const selected = theme === "light" ? "light" : "dark";
+      currentTheme = selected;
+      document.documentElement.dataset.theme = selected;
+      document.documentElement.style.colorScheme = selected;
+
+      const themeColor = document.querySelector("[data-theme-color]");
+      if (themeColor) {
+        themeColor.setAttribute(
+          "content",
+          selected === "dark" ? "#071329" : "#f4f7ff"
+        );
+      }
+
+      themeButtons.forEach((button) => {
+        const active = button.dataset.themeOption === selected;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+      if (themeSwitch) themeSwitch.hidden = false;
+    }
+
     languageButtons.forEach((button) => {
       button.addEventListener("click", () => applyLanguage(button.dataset.language));
     });
-    applyLanguage("zh");
+    themeButtons.forEach((button) => {
+      button.addEventListener("click", () => applyTheme(button.dataset.themeOption));
+    });
+    applyLanguage(currentLanguage);
+    applyTheme(currentTheme);
   </script>
 </body>
 </html>
