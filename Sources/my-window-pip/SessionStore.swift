@@ -74,9 +74,13 @@ final class SessionStore {
         let source = store.captureSource(for: window)
         let size = window.frame.size
         guard size.width > 1, size.height > 1 else { return }
+        let positionIdentity = PositionMemoryIdentity.window(
+            appPreferenceKey: source.preferenceKey, windowID: window.windowID
+        )
 
         let request = SessionRequest(
             source: source,
+            positionIdentity: positionIdentity,
             baseSourceRect: CGRect(origin: .zero, size: size),
             sourcePixelSize: store.pixelSize(of: window),
             sourcePointSize: size,
@@ -84,7 +88,11 @@ final class SessionStore {
             autoHide: Preferences.shared.autoHideDefault,
             idleDetection: Preferences.shared.idleDetectionDefault
         )
-        add(PiPSession(request: request, cascadeIndex: sessions.count))
+        add(PiPSession(
+            request: request,
+            initialOrigin: initialOrigin(for: positionIdentity),
+            cascadeIndex: sessions.count
+        ))
         Log.info("新建窗口 PiP：\(source.displayTitle) @ \(request.fps.label)")
     }
 
@@ -114,8 +122,12 @@ final class SessionStore {
             ).intersection(CGRect(origin: .zero, size: frameTopLeft.size))
             if local.width >= 40, local.height >= 40 {
                 let source = store.captureSource(for: window)
+                let positionIdentity = PositionMemoryIdentity.windowRegion(
+                    appPreferenceKey: source.preferenceKey, windowID: window.windowID, rect: local
+                )
                 let request = SessionRequest(
                     source: source,
+                    positionIdentity: positionIdentity,
                     baseSourceRect: local,
                     sourcePixelSize: CGSize(width: local.width * scale, height: local.height * scale),
                     sourcePointSize: local.size,
@@ -123,7 +135,11 @@ final class SessionStore {
                     autoHide: Preferences.shared.autoHideDefault,
                     idleDetection: Preferences.shared.idleDetectionDefault
                 )
-                add(PiPSession(request: request, cascadeIndex: sessions.count))
+                add(PiPSession(
+                    request: request,
+                    initialOrigin: initialOrigin(for: positionIdentity),
+                    cascadeIndex: sessions.count
+                ))
                 Log.info("新建窗口内区域 PiP：\(source.displayTitle) \(Int(local.width))×\(Int(local.height))")
                 return
             }
@@ -132,8 +148,12 @@ final class SessionStore {
         // 否则退回显示器流 + 显示器局部裁剪
         let local = Geo.sckRect(fromScreenRect: result.screenRect, on: result.screen)
         let source = CaptureSource.region(displayID: result.displayID, rect: result.screenRect)
+        let positionIdentity = PositionMemoryIdentity.displayRegion(
+            displayID: result.displayID, rect: result.screenRect
+        )
         let request = SessionRequest(
             source: source,
+            positionIdentity: positionIdentity,
             baseSourceRect: local,
             sourcePixelSize: CGSize(width: local.width * scale, height: local.height * scale),
             sourcePointSize: local.size,
@@ -141,7 +161,11 @@ final class SessionStore {
             autoHide: Preferences.shared.autoHideDefault,
             idleDetection: Preferences.shared.idleDetectionDefault
         )
-        add(PiPSession(request: request, cascadeIndex: sessions.count))
+        add(PiPSession(
+            request: request,
+            initialOrigin: initialOrigin(for: positionIdentity),
+            cascadeIndex: sessions.count
+        ))
         Log.info("新建屏幕区域 PiP：\(Int(local.width))×\(Int(local.height)) @ display \(result.displayID)")
     }
 
@@ -175,6 +199,27 @@ final class SessionStore {
     }
 
     // MARK: - 内部
+
+    /// 精确的捕获目标位置优先。没有记录且同一回退命名空间已有 PiP 时，不复用旧版位置，
+    /// 让 `PiPWindowController` 的 cascade 布局生效；首个目标仍可沿用旧版本记住的位置。
+    private func initialOrigin(for identity: PositionMemoryIdentity) -> CGPoint? {
+        let prefs = Preferences.shared
+        let exact = prefs.origin(for: identity)
+        let hasActiveSibling = sessions.contains {
+            $0.positionFallbackPreferenceKey == identity.fallbackPreferenceKey
+        }
+        return Self.selectInitialOrigin(
+            exactOrigin: exact,
+            fallbackOrigin: prefs.fallbackOrigin(for: identity),
+            hasActiveSibling: hasActiveSibling
+        )
+    }
+
+    static func selectInitialOrigin(exactOrigin: CGPoint?, fallbackOrigin: CGPoint?,
+                                    hasActiveSibling: Bool) -> CGPoint? {
+        if let exactOrigin { return exactOrigin }
+        return hasActiveSibling ? nil : fallbackOrigin
+    }
 
     private func add(_ session: PiPSession) {
         session.onResolveDragFrame = { [weak self, weak session] proposed, flags in

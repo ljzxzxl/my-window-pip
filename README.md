@@ -41,7 +41,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 **Picture-in-Picture**
 - Turn the frontmost window into a PiP with one hotkey (`⌃⌥P`), or pick a window from the menu bar list.
 - Capture any screen region (`⌃⌥⇧P`); if the selection lands inside a window, a window stream is used instead, so it follows the window and keeps working when the window is covered.
-- Multiple PiP windows at once, cascaded automatically; position and width remembered per app.
+- Multiple PiP windows at once, cascaded automatically; each source window or captured region remembers its own position, while width remains app-level.
 - Drag a PiP near a screen edge or another PiP to snap it into place; adjacent PiPs join with no gap. Snapping never resizes the window; hold `Control` while dragging to bypass it temporarily.
 - Floating, borderless, aspect-locked, visible on all Spaces and above full-screen apps — but below system pop-up menus, so menu bar utilities still open on top of it.
 
@@ -203,7 +203,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 **画中画**
 - 一键把前台窗口变浮窗（`⌃⌥P`），或从菜单栏窗口列表里挑。
 - 框选任意屏幕区域做画中画（`⌃⌥⇧P`）；选区落在某个窗口内时自动改用窗口流，可跟随窗口移动、被遮挡也能捕获。
-- 多个浮窗同时运行，自动错位摆放，位置与宽度按应用记忆。
+- 多个浮窗同时运行，自动错位摆放；每个源窗口或捕获区域分别记忆位置，宽度仍按应用记忆。
 - 浮窗靠近屏幕边缘或其他浮窗时会自动吸附，相邻浮窗之间无间隔。磁吸只调整位置、不改变窗口大小；拖动时按住 `Control` 可临时跳过磁吸。
 - 浮窗置顶、可在所有 Space 与全屏应用之上显示、无边框、锁定宽高比；但层级低于系统下拉菜单，浮窗放右上角也不会挡住菜单栏工具的菜单。
 

@@ -13,6 +13,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     /// 捕获基准矩形（源坐标系、左上原点、逻辑点），缩放平移都在其内部进行
     private var baseRect: CGRect
     private var sourcePixelSize: CGSize
+    /// 与显示标题解耦的位置身份；窗口重匹配时只更新其中的 CGWindowID。
+    private var positionIdentity: PositionMemoryIdentity
 
     private let engine = CaptureEngine()
     private let windowController: PiPWindowController
@@ -57,7 +59,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     // MARK: - 生命周期
 
-    init(request: SessionRequest, cascadeIndex: Int) {
+    init(request: SessionRequest, initialOrigin: CGPoint?, cascadeIndex: Int) {
         state = PiPSessionState(
             source: request.source,
             fps: request.fps,
@@ -66,6 +68,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         )
         baseRect = request.baseSourceRect
         sourcePixelSize = request.sourcePixelSize
+        positionIdentity = request.positionIdentity
         idleDetector = IdleDetector()
 
         let prefs = Preferences.shared
@@ -75,7 +78,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             title: request.source.displayTitle,
             aspect: request.sourcePointSize,
             initialWidth: width,
-            origin: prefs.origin(for: request.source.preferenceKey),
+            origin: initialOrigin,
             levelMode: prefs.windowLevelMode,
             cascadeIndex: cascadeIndex
         )
@@ -117,6 +120,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     // MARK: - 对外操作
 
     var sourceWindowID: CGWindowID? { state.source.windowID }
+    var positionFallbackPreferenceKey: String { positionIdentity.fallbackPreferenceKey }
     var title: String { state.source.displayTitle }
     var isHidden: Bool { state.isHidden }
     var isPaused: Bool { state.isPaused }
@@ -623,7 +627,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 return
             }
             Log.info("已重新匹配到源窗口：\(ShareableContentStore.shared.displayTitle(for: window))")
-            self.state.source = ShareableContentStore.shared.captureSource(for: window)
+            let rematchedSource = ShareableContentStore.shared.captureSource(for: window)
+            self.state.source = rematchedSource
+            self.positionIdentity = self.positionIdentity.retargetingWindow(to: rematchedSource)
             // 重新匹配同样不能照抄可能被总览变换过的尺寸
             let size = self.trustedSize(of: window) ?? self.baseRect.size
             self.baseRect = CGRect(origin: .zero, size: size)
@@ -783,9 +789,14 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     }
 
     private func persistGeometry() {
-        let key = state.source.preferenceKey
-        Preferences.shared.setPreferredWidth(windowController.contentPointSize.width, for: key)
-        Preferences.shared.setOrigin(windowController.frameOrigin, for: key)
+        Preferences.shared.setPreferredWidth(
+            windowController.contentPointSize.width, for: state.source.preferenceKey
+        )
+        persistOrigin()
+    }
+
+    private func persistOrigin() {
+        Preferences.shared.setOrigin(windowController.frameOrigin, for: positionIdentity)
     }
 
     // MARK: - PiPWindowDelegate
@@ -939,6 +950,6 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     }
 
     func pipDidMove() {
-        Preferences.shared.setOrigin(windowController.frameOrigin, for: state.source.preferenceKey)
+        persistOrigin()
     }
 }
