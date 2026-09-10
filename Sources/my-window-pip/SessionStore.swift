@@ -361,6 +361,7 @@ final class SessionStore {
                   isSameDisplay(siblingScreen, screen) else { return nil }
             return frame
         }
+        // 使用目标显示器自己的可用区域：零间隙贴边，同时不侵入菜单栏或 Dock。
         return Geo.snappedWindowFrame(proposed, in: visibleFrame, siblings: siblings)
     }
 
