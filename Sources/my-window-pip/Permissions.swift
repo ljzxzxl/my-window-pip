@@ -7,12 +7,25 @@ enum Permissions {
 
     // MARK: - 屏幕录制
 
+    /// 原子记录本进程是否已经触发过系统授权请求，避免并发入口重复请求或叠加 App 引导。
+    private final class ScreenRecordingRequestState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var didRequest = false
+
+        /// 首个调用方把状态置为已请求并返回 true；后续调用返回 false。
+        func beginRequestIfNeeded() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !didRequest else { return false }
+            didRequest = true
+            return true
+        }
+    }
+
+    private static let screenRecordingRequestState = ScreenRecordingRequestState()
+
     /// 不弹窗的预检。
     static var hasScreenRecording: Bool { CGPreflightScreenCaptureAccess() }
-
-    /// 首次调用会触发系统授权弹窗；已被拒绝时直接返回 false。
-    @discardableResult
-    static func requestScreenRecording() -> Bool { CGRequestScreenCaptureAccess() }
 
     /// 让系统把本应用登记进「屏幕录制与系统录音」列表。
     ///
@@ -22,7 +35,7 @@ enum Permissions {
     /// 1. `CGRequestScreenCaptureAccess()` 触发系统授权弹窗并写入 TCC 条目
     /// 2. 再发一次 ScreenCaptureKit 查询，确保 SCK 侧也完成登记（失败被系统吞掉是正常的）
     @discardableResult
-    static func primeRegistration() -> Bool {
+    private static func primeRegistration() -> Bool {
         let granted = CGRequestScreenCaptureAccess()
         Task.detached(priority: .utility) {
             _ = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
@@ -30,13 +43,19 @@ enum Permissions {
         return granted
     }
 
-    /// 确保拥有屏幕录制权限：先向系统申请（顺带完成列表登记），仍未授权才显示引导。
+    /// 确保拥有屏幕录制权限。
+    ///
+    /// 首次调用只发起 macOS 系统授权：系统弹窗是实际授予 TCC 权限的唯一入口，不与 App
+    /// 自己的说明框叠加。若本次启动已经请求过、用户之后仍主动触发捕获或点击权限菜单，
+    /// 才显示 App 引导，提供系统设置、重置记录与重启入口。
     @discardableResult
     static func ensureScreenRecording() -> Bool {
         if hasScreenRecording { return true }
-        if primeRegistration() { return true }
-        // 系统弹窗是异步的，用户可能刚点了「允许」，复检一次避免多弹一个框
-        if hasScreenRecording { return true }
+        if screenRecordingRequestState.beginRequestIfNeeded() {
+            _ = primeRegistration()
+            // 系统授权可能要求重启应用才生效；这里只复检，不在同一轮再弹 App 引导。
+            return hasScreenRecording
+        }
         showScreenRecordingGuide()
         return false
     }
