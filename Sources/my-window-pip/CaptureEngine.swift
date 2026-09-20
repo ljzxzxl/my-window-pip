@@ -124,7 +124,9 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         // 单窗口捕获默认会带上窗口阴影，浮窗里会显示成一圈半透明边，去掉更干净
         cfg.ignoreShadowsSingleWindow = true
         if #available(macOS 14.2, *) {
-            cfg.includeChildWindows = true                   // 抽屉/弹出面板也一起进画面
+            // PiP 的几何基准是选中的主窗口。附属窗口可能超出其边界；一起捕获会
+            // 扩大内容范围，并在 scalesToFit 下把主画面缩小，即使浮窗外框不变。
+            cfg.includeChildWindows = false
         }
         return cfg
     }
