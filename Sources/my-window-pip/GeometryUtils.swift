@@ -313,18 +313,18 @@ enum Geo {
     ///
     /// - Parameters:
     ///   - proposed: 鼠标位移换算出的原始 frame。
-    ///   - visibleFrame: 目标屏幕的实时 `visibleFrame`。
+    ///   - visibleFrame: 目标屏幕的实时 `visibleFrame`，排除菜单栏和 Dock 占用的区域。
     ///   - siblings: 同一屏幕上其他可见 PiP 的 frame。
     ///   - threshold: 进入磁吸的最大距离。
     ///   - gap: 两个相邻浮窗之间保留的间距。
-    ///   - edgeInset: 浮窗与屏幕可见边缘之间的内缩。
+    ///   - edgeInset: 浮窗与屏幕可用区域边缘之间的内缩。
     static func snappedWindowFrame(
         _ proposed: CGRect,
         in visibleFrame: CGRect,
         siblings: [CGRect],
         threshold: CGFloat = 12,
         gap: CGFloat = 0,
-        edgeInset: CGFloat = 12
+        edgeInset: CGFloat = 0
     ) -> CGRect {
         guard proposed.width > 0, proposed.height > 0,
               visibleFrame.width > 0, visibleFrame.height > 0,
@@ -504,7 +504,7 @@ enum Geo {
         let visible = CGRect(x: 0, y: 0, width: 1000, height: 800)
         let nearRight = CGRect(x: 689, y: 200, width: 300, height: 180)
         let snappedRight = snappedWindowFrame(nearRight, in: visible, siblings: [])
-        assert(abs(snappedRight.maxX - 988) < 0.001, "应吸附到屏幕右边 12pt 内缩")
+        assert(abs(snappedRight.maxX - 1000) < 0.001, "应无间隙吸附到屏幕可用区域右边")
         assert(snappedRight.size == nearRight.size, "磁吸不应改变窗口尺寸")
 
         // 相邻窗口：右边对齐，上下边缘无间隙贴合

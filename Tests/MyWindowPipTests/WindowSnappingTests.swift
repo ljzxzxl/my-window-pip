@@ -27,15 +27,30 @@ final class WindowSnappingTests: XCTestCase {
         ))
     }
 
-    func testScreenEdgeSnappingSupportsNegativeDisplayCoordinatesAndPreservesSize() {
-        let visibleFrame = CGRect(x: -1200, y: -100, width: 1200, height: 900)
-        let proposed = CGRect(x: -311, y: 200, width: 300, height: 180)
+    func testScreenEdgeSnappingHasNoGapOnNegativeVisibleFrameCoordinates() {
+        // 模拟副屏完整高度为 900pt、顶部菜单栏占用 40pt 后的可用区域。
+        let visibleFrame = CGRect(x: -1200, y: -100, width: 1200, height: 860)
+        let cases: [(proposed: CGRect, expected: CGRect)] = [
+            (CGRect(x: -1199, y: 200, width: 300, height: 180),
+             CGRect(x: -1200, y: 200, width: 300, height: 180)),
+            (CGRect(x: -301, y: 200, width: 300, height: 180),
+             CGRect(x: -300, y: 200, width: 300, height: 180)),
+            (CGRect(x: -800, y: -99, width: 300, height: 180),
+             CGRect(x: -800, y: -100, width: 300, height: 180)),
+            (CGRect(x: -800, y: 659, width: 300, height: 100),
+             CGRect(x: -800, y: 660, width: 300, height: 100)),
+        ]
 
-        let snapped = Geo.snappedWindowFrame(proposed, in: visibleFrame, siblings: [])
+        for testCase in cases {
+            let snapped = Geo.snappedWindowFrame(
+                testCase.proposed,
+                in: visibleFrame,
+                siblings: []
+            )
 
-        XCTAssertEqual(snapped.maxX, -12, accuracy: 0.001)
-        XCTAssertEqual(snapped.origin.y, proposed.origin.y, accuracy: 0.001)
-        XCTAssertEqual(snapped.size, proposed.size)
+            XCTAssertEqual(snapped, testCase.expected)
+            XCTAssertEqual(snapped.size, testCase.proposed.size)
+        }
     }
 
     func testSiblingSnappingJoinsEveryAdjacentEdgeWithNoGap() {
