@@ -164,4 +164,31 @@ final class DisplayCaptureTests: XCTestCase {
         XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [builtin, external], lastUsedID: 1),
                        builtin)
     }
+
+    // MARK: - 显示器热插拔（本机无法实机插拔，用屏幕列表快照验证策略）
+
+    func testRepluggedExternalWithFreshDisplayIDIsPickedAgain() {
+        let builtin = display(1, "Built-in", main: true, builtin: true)
+        let before = display(2, "External")
+        // 重新接入后 CGDirectDisplayID 通常会变化
+        let after = display(88, "External (reconnected)")
+        XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [builtin, before], lastUsedID: 2),
+                       before)
+        XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [builtin, after], lastUsedID: 2),
+                       after)
+    }
+
+    func testDisplayOrderChangeDoesNotBreakRememberedTarget() {
+        let builtin = display(1, "Built-in", main: true, builtin: true)
+        let external = display(2, "External")
+        // 用户在菜单里选过内建屏；屏幕排列顺序变化不应改变按 ID 记忆的目标。
+        XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [builtin, external], lastUsedID: 1),
+                       builtin)
+        XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [external, builtin], lastUsedID: 1),
+                       builtin)
+    }
+
+    func testNoDisplayDuringUnplugReturnsNil() {
+        XCTAssertNil(DisplayCaptureTarget.hotkeyTarget(in: [], lastUsedID: 2))
+    }
 }

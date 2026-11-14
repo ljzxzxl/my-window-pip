@@ -40,6 +40,11 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     private var reconnectAttempt = 0
     private var reconnectWork: DispatchWorkItem?
     private var probeTimer: Timer?
+    /// 整屏 / 区域会话的卡流恢复节奏与待执行计划（窗口会话走 `probeTimer` 的生命周期探测）。
+    private var displayStall = DisplayStallRecovery()
+    private var displayStallWork: DispatchWorkItem?
+    /// 撤销恢复计划的代次；`DispatchWorkItem.cancel()` 不保证已入队的 block 不再执行。
+    private var displayStallGeneration: UInt64 = 0
     /// 创建会话时记录的源 owner PID，用于防止 CGWindowID 被复用后误认成原窗口。
     private var sourcePID: pid_t?
     /// 生命周期查询可能包含同步 AX IPC；只允许低频后台探测，主线程只应用结果。
@@ -128,6 +133,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         isClosed = true
         reconnectWork?.cancel()
         geometryRecheckWork?.cancel()
+        cancelDisplayStallRecovery()
         probeTimer?.invalidate()
         hiddenAutoCloseTimer?.invalidate()
         HoverMonitor.shared.unregister(id: id)
@@ -438,6 +444,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     private func pauseCapture(reason: String) {
         guard engine.isRunning, !engine.isPaused else { return }
+        // 暂停期间不该再重建流；恢复后若仍停帧，会从全新预算重新退避。
+        cancelDisplayStallRecovery()
         windowController.recordRendererEvent("capture.pause reason=\(reason)")
         engine.pause()
     }
@@ -583,6 +591,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
             guard let self, !self.isClosed else { return }
             // 任何真实帧恢复都说明刚才的离屏 retarget 有效；允许下一次独立 stall 再尝试一次。
             self.offscreenRetargetAttempted = false
+            // 真实帧是最好的恢复证据：撤销待执行的重建计划并清空退避，
+            // 下一次独立 stall 才会重新拿到完整的 2s / 4s / 8s 预算。
+            self.cancelDisplayStallRecovery()
             if case .streaming = self.runtimeState {} else if !self.state.isPaused {
                 self.update(runtimeState: .streaming)
                 self.reconnectAttempt = 0
@@ -610,7 +621,14 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         windowController.recordRendererEvent("capture.stall no-valid-frame")
         // stall 只表示 transport 没有帧，不能直接推导 minimized/closed。
         update(runtimeState: .sourceOffscreen)
-        startProbeTimer()
+        switch state.source {
+        case .window:
+            startProbeTimer()
+        case .region, .display:
+            // 静止画面 / 原生全屏 Space 下 SCK 会长时间停帧。只做有限次退避重建，
+            // 不能像窗口会话那样每 2 秒重查一次生命周期并重启流。
+            scheduleDisplayStallRecovery()
+        }
     }
 
     private func apply(_ verdict: IdleVerdict) {
@@ -634,6 +652,59 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
         }
     }
 
+    // MARK: - 整屏 / 区域卡流恢复（有限退避）
+
+    /// 安排一次恢复动作；已有待执行计划时不重复排队。
+    /// 每收到一次 stall 只推进一档退避；重建后若仍无帧，watchdog 会再次上报并进入下一档。
+    private func scheduleDisplayStallRecovery() {
+        guard displayStallWork == nil else { return }
+        let action = displayStall.schedule()
+        let generation = displayStallGeneration
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isClosed else { return }
+            // 即使这一代计划已被撤销，也要先释放占位；否则后续 stall 会以为仍有计划待执行。
+            if self.displayStallGeneration == generation { self.displayStallWork = nil }
+            guard self.displayStallGeneration == generation,
+                  self.runtimeState == .sourceOffscreen else { return }
+            self.performDisplayStallAction(action)
+        }
+        displayStallWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + action.delay, execute: work)
+    }
+
+    private func performDisplayStallAction(_ action: DisplayStallRecovery.Action) {
+        switch action {
+        case .restart:
+            windowController.recordRendererEvent(
+                "capture.display-stall.restart budget=\(displayStall.restartCount)"
+            )
+            restartCapture(reason: "整屏捕获恢复（第 \(displayStall.restartCount) 次）")
+            // 不在这里续排队：重启会重置 stall watchdog，若确实仍无帧，
+            // 下一次 captureDidStall() 自然带来下一档退避。
+
+        case .healthCheck:
+            guard let displayID = state.source.displayID else { return }
+            ShareableContentStore.shared.display(id: displayID) { [weak self] display in
+                guard let self, !self.isClosed,
+                      self.runtimeState == .sourceOffscreen else { return }
+                if self.displayStall.observeHealth(displayPresent: display != nil) {
+                    self.windowController.recordRendererEvent("capture.display-stall.health-restart")
+                    self.restartCapture(reason: "显示器重新接入 / 长时间停帧后恢复")
+                }
+                // 健康检查阶段不会再有新的 stall 上报，必须自己续上下一次检查。
+                self.scheduleDisplayStallRecovery()
+            }
+        }
+    }
+
+    /// 撤销待执行的恢复计划并把退避清零（真实帧恢复、暂停、屏幕参数变化、关闭时调用）。
+    private func cancelDisplayStallRecovery() {
+        displayStallWork?.cancel()
+        displayStallWork = nil
+        displayStallGeneration &+= 1
+        displayStall.reset()
+    }
+
     private func probeSource() {
         guard !isClosed, !isSourceProbeInFlight else { return }
         switch state.source {
@@ -653,7 +724,9 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 }
             }
         case .region, .display:
-            restartCapture(reason: "显示器捕获恢复")
+            // 整屏会话正常走上面的有限退避调度，不会启动 probeTimer；这里只兜住
+            // --smoke 的 debugProbeNow() 与意外路径，保持幂等，绝不无条件重启流。
+            scheduleDisplayStallRecovery()
         }
     }
 
@@ -949,6 +1022,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
 
     func handleScreenParametersChanged() {
         guard !isClosed else { return }
+        // 显示器插拔 / 全屏 Space 切换本身就是一次重建，旧的退避预算不该沿用。
+        cancelDisplayStallRecovery()
         retune(reason: "屏幕参数变化")
         // 显示器拔插 / 分辨率变化 / 全屏 Space 切换后，旧的 SCDisplay 快照可能已经失效。
         // 只 updateConfiguration 不会换过滤器，继续用旧 display 会让 SCK 报错甚至中断流。

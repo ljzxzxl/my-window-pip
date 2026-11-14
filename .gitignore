@@ -9,3 +9,5 @@ dist/
 # 发布签名证书（.p12 + 密码），绝不能提交
 signing-cert.local/
 *.p12
+# 临时放在仓库目录里的发版 Secrets 清单（含 p12 base64 与密码），绝不能提交
+*-Secrets.txt

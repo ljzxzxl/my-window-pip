@@ -13,6 +13,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 生成 Full Changelog 链接需要能回溯到上一个 tag
+          fetch-depth: 0
 
       - name: 校验 tag 与 VERSION 一致
         run: |
@@ -55,13 +58,32 @@ jobs:
       - name: 打包 DMG
         run: bash packaging/make-dmg.sh
 
+      # 自动生成的 Full Changelog 只有一串 commit 标题。把 docs/RELEASE_NOTES.md
+      # 作为正文主体（每次发版前更新），再附上与上一版的比较链接。
+      - name: 生成 Release 正文
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          {
+            echo "## MyWindowPip ${GITHUB_REF_NAME#v}"
+            echo
+            cat docs/RELEASE_NOTES.md
+            echo
+            echo "---"
+            if [ -n "$PREV" ]; then
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV}...${GITHUB_REF_NAME}"
+            else
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/commits/${GITHUB_REF_NAME}"
+            fi
+          } > dist/release-body.md
+          cat dist/release-body.md
+
       - name: 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.dmg
             dist/*.dmg.sha256
-          generate_release_notes: true
+          body_path: dist/release-body.md
 
       - name: 清理签名 keychain
         if: always()

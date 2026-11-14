@@ -1,0 +1,75 @@
+name: Post issue replies
+
+# 一次性任务：推送本文件即可给已关闭的 #12 / #13 补上说明评论。
+# 脚本按隐藏标记做幂等判断，重复运行不会产生重复评论。
+# 完成使命后可删除本文件；删除时该 workflow 已不在触发 commit 中，不会再次运行。
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/issue-replies.yml
+
+permissions:
+  issues: write
+
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- mwp-issue-reply -->';
+            const replies = [
+              {
+                number: 12,
+                body: [
+                  '已在新版中支持，感谢反馈',
+                  '',
+                  '- 新增「捕获整块显示器」：菜单栏「Capture a Display / 捕获整块显示器」子菜单可显式选择目标；热键 ⌃⌥D 一键捕获，默认优先外接显示器，单屏时自动回退。',
+                  '- 菜单里会显示显示器名称、分辨率与「内建 / 外接」，屏幕热插拔后打开菜单会刷新列表。',
+                  '- 整屏 PiP 使用显示器合成流并排除本 App 自身窗口，不会出现镜中镜。',
+                  '',
+                  '修复随 v0.1.8 发布；v0.1.9 起「检查更新」也恢复正常（不再因 GitHub API 未认证配额返回 HTTP 403）。DMG 可在 Releases 下载。',
+                  '',
+                  '（本条由维护者通过项目 workflow 补发，issue 已由默认分支的 closing commit 关闭。）',
+                ].join('\n'),
+              },
+              {
+                number: 13,
+                body: [
+                  '已修复，感谢反馈',
+                  '',
+                  '原因：普通框选时，只要选区中心命中某个窗口，旧版就会把区域流升级成单窗口流。副屏上的全屏播放器（VLC / IINA）必然命中，于是同屏的翻译浮窗、字幕和菜单栏全被吃掉。',
+                  '',
+                  '现在：',
+                  '- 普通拖拽始终使用显示器合成流 + 选区裁剪，保留该区域内的所有内容；',
+                  '- 只有 ⌥ 单击才走「整个窗口」流；',
+                  '- 需要旧行为可在「设置 → 通用」打开兼容开关。',
+                  '',
+                  '已用全屏播放器 + 翻译浮窗场景做真机验证，并用 A/B 对照复现旧问题。修复随 v0.1.8 发布。',
+                  '',
+                  '（本条由维护者通过项目 workflow 补发，issue 已由默认分支的 closing commit 关闭。）',
+                ].join('\n'),
+              },
+            ];
+
+            for (const { number, body } of replies) {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                per_page: 100,
+              });
+              if (comments.some(c => (c.body || '').includes(marker))) {
+                core.info('#' + number + ' already replied, skip');
+                continue;
+              }
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                body: marker + '\n' + body,
+              });
+              core.info('replied #' + number);
+            }
