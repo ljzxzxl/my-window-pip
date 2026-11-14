@@ -218,44 +218,78 @@ final class SessionStore {
 
     private func createRegionSession(_ result: RegionSelectionController.Result) {
         guard confirmIfOverLimit() else { return }
-        let store = ShareableContentStore.shared
-        let scale = result.screen.backingScaleFactor
 
-        // 选区落在某个窗口内 → 用窗口流 + 窗口局部裁剪：可跟随窗口移动，被遮挡也能捕获
-        if let windowID = result.hitWindowID,
-           let frameTopLeft = result.hitWindowFrameTopLeft,
-           let window = store.cachedWindow(id: windowID) {
-            let local = Geo.windowLocalRect(
-                fromScreenRect: result.screenRect,
-                windowFrameTopLeft: frameTopLeft,
-                primaryScreenMaxY: Geo.primaryScreenMaxY
-            ).intersection(CGRect(origin: .zero, size: frameTopLeft.size))
-            if local.width >= 40, local.height >= 40 {
-                let source = store.captureSource(for: window)
-                let positionIdentity = PositionMemoryIdentity.windowRegion(
-                    appPreferenceKey: source.preferenceKey, windowID: window.windowID, rect: local
-                )
-                let request = SessionRequest(
-                    source: source,
-                    positionIdentity: positionIdentity,
-                    baseSourceRect: local,
-                    sourcePixelSize: CGSize(width: local.width * scale, height: local.height * scale),
-                    sourcePointSize: local.size,
-                    fps: Preferences.shared.fps(for: source.preferenceKey),
-                    autoHide: Preferences.shared.autoHideDefault,
-                    idleDetection: Preferences.shared.idleDetectionDefault
-                )
-                add(PiPSession(
-                    request: request,
-                    initialOrigin: initialOrigin(for: positionIdentity),
-                    cascadeIndex: sessions.count
-                ))
-                Log.info("新建窗口内区域 PiP：\(source.displayTitle) \(Int(local.width))×\(Int(local.height))")
+        // 默认必须是显示器合成流：用户框选的是屏幕上的一块区域，同屏的悬浮字幕、
+        // 翻译窗口、菜单栏都要进画面。只有 ⌥ 单击（或设置里的兼容开关）才升级成单窗口流，
+        // 否则全屏 VLC / IINA 会把整块屏幕吃掉（issue #13）。
+        let wantsWindowStream = RegionCapturePolicy.usesWindowStream(
+            snapWindow: result.prefersWindowCapture,
+            followsWindowByDefault: Preferences.shared.regionFollowsWindow,
+            hitWindowID: result.hitWindowID
+        )
+        if wantsWindowStream, let windowID = result.hitWindowID {
+            createWindowRegionSession(result, windowID: windowID)
+            return
+        }
+        createDisplayRegionSession(result)
+    }
+
+    /// 显式要求「只要这个窗口」时才走单窗口流（跟随窗口、被遮挡也能拍）。
+    private func createWindowRegionSession(_ result: RegionSelectionController.Result,
+                                           windowID: CGWindowID) {
+        // 异步取最新的 SCWindow：直接用 1 秒 TTL 缓存里的旧对象构造
+        // desktopIndependentWindow 过滤器，在 Space 切换 / 显示器重排后可能指向已销毁窗口。
+        ShareableContentStore.shared.window(id: windowID) { [weak self] window in
+            guard let self else { return }
+            guard let window else {
+                Log.warn("窗口流目标已失效，回退到显示器合成流")
+                self.createDisplayRegionSession(result)
                 return
             }
-        }
+            let full = CGRect(origin: .zero, size: window.frame.size)
+            let local: CGRect
+            if result.prefersWindowCapture {
+                // ⌥ 单击选中整个窗口：不做局部裁剪，让 SCK 输出完整窗口内容
+                local = full
+            } else {
+                local = Geo.windowLocalRect(
+                    fromScreenRect: result.screenRect,
+                    windowFrameTopLeft: window.frame,
+                    primaryScreenMaxY: Geo.primaryScreenMaxY
+                ).intersection(full)
+                guard local.width >= 40, local.height >= 40 else {
+                    self.createDisplayRegionSession(result)
+                    return
+                }
+            }
 
-        // 否则退回显示器流 + 显示器局部裁剪
+            let scale = result.screen.backingScaleFactor
+            let source = ShareableContentStore.shared.captureSource(for: window)
+            let positionIdentity = PositionMemoryIdentity.windowRegion(
+                appPreferenceKey: source.preferenceKey, windowID: window.windowID, rect: local
+            )
+            let request = SessionRequest(
+                source: source,
+                positionIdentity: positionIdentity,
+                baseSourceRect: local,
+                sourcePixelSize: CGSize(width: local.width * scale, height: local.height * scale),
+                sourcePointSize: local.size,
+                fps: Preferences.shared.fps(for: source.preferenceKey),
+                autoHide: Preferences.shared.autoHideDefault,
+                idleDetection: Preferences.shared.idleDetectionDefault
+            )
+            add(PiPSession(
+                request: request,
+                initialOrigin: initialOrigin(for: positionIdentity),
+                cascadeIndex: sessions.count
+            ))
+            Log.info("新建窗口内区域 PiP：\(source.displayTitle) \(Int(local.width))×\(Int(local.height))")
+        }
+    }
+
+    /// 显示器流 + 显示器局部裁剪：捕获选区范围内的完整合成画面。
+    private func createDisplayRegionSession(_ result: RegionSelectionController.Result) {
+        let scale = result.screen.backingScaleFactor
         let local = Geo.sckRect(fromScreenRect: result.screenRect, on: result.screen)
         let source = CaptureSource.region(displayID: result.displayID, rect: result.screenRect)
         let positionIdentity = PositionMemoryIdentity.displayRegion(
@@ -277,6 +311,92 @@ final class SessionStore {
             cascadeIndex: sessions.count
         ))
         Log.info("新建屏幕区域 PiP：\(Int(local.width))×\(Int(local.height)) @ display \(result.displayID)")
+    }
+
+    // MARK: - 整屏捕获（issue #12）
+
+    /// 当前可捕获的显示器列表（菜单栏子菜单与热键共用）。
+    static func availableDisplays() -> [DisplayTarget] {
+        let mainID = CGMainDisplayID()
+        return NSScreen.screens.map { screen in
+            let id = RegionSelectionController.displayID(of: screen)
+            return DisplayTarget(
+                displayID: id,
+                name: screen.localizedName,
+                frame: screen.frame,
+                isMain: id == mainID,
+                isBuiltin: CGDisplayIsBuiltin(id) != 0
+            )
+        }
+    }
+
+    /// 热键入口：一键捕获外接显示器（或上次在菜单栏选中的那块），无需框选。
+    func capturePreferredDisplay() {
+        let targets = Self.availableDisplays()
+        guard let target = DisplayCaptureTarget.hotkeyTarget(
+            in: targets, lastUsedID: Preferences.shared.lastCaptureDisplayID
+        ) else {
+            notify(title: L.t("没有可用的显示器", "No display available"),
+                   message: L.t("系统当前没有报告任何已连接的显示器。",
+                                "macOS is not reporting any connected display."))
+            return
+        }
+        createDisplaySession(target)
+    }
+
+    /// 菜单栏入口：捕获指定的整块显示器。
+    func captureDisplay(displayID: CGDirectDisplayID) {
+        guard let target = DisplayCaptureTarget.withID(displayID, in: Self.availableDisplays()) else {
+            Log.warn("显示器 \(displayID) 已断开，忽略整屏捕获")
+            return
+        }
+        createDisplaySession(target)
+    }
+
+    private func createDisplaySession(_ target: DisplayTarget) {
+        guard Permissions.ensureScreenRecording() else { return }
+        guard let screen = NSScreen.screens.first(where: {
+            RegionSelectionController.displayID(of: $0) == target.displayID
+        }) else {
+            Log.warn("显示器 \(target.displayID) 已断开，忽略整屏捕获")
+            return
+        }
+
+        // 同一块显示器已经有整屏浮窗时直接提到最前，避免热键连按堆出一排重复浮窗。
+        if let existing = sessions.first(where: { session in
+            guard case let .display(displayID, _, _) = session.state.source else { return false }
+            return displayID == target.displayID
+        }) {
+            existing.bringToFront()
+            existing.flashHighlight()
+            return
+        }
+        guard confirmIfOverLimit() else { return }
+        Preferences.shared.lastCaptureDisplayID = target.displayID
+
+        let scale = screen.backingScaleFactor
+        // 整屏在显示器局部坐标里就是 (0, 0, w, h)；SCK 侧用 .zero 表示「完整内容」。
+        let local = Geo.sckRect(fromScreenRect: screen.frame, on: screen)
+        let source = CaptureSource.display(
+            displayID: target.displayID, name: target.name, rect: screen.frame
+        )
+        let positionIdentity = PositionMemoryIdentity.display(displayID: target.displayID)
+        let request = SessionRequest(
+            source: source,
+            positionIdentity: positionIdentity,
+            baseSourceRect: local,
+            sourcePixelSize: CGSize(width: local.width * scale, height: local.height * scale),
+            sourcePointSize: local.size,
+            fps: Preferences.shared.fps(for: source.preferenceKey),
+            autoHide: Preferences.shared.autoHideDefault,
+            idleDetection: Preferences.shared.idleDetectionDefault
+        )
+        add(PiPSession(
+            request: request,
+            initialOrigin: initialOrigin(for: positionIdentity),
+            cascadeIndex: sessions.count
+        ))
+        Log.info("新建整屏 PiP：\(target.name) \(target.dimensions) @ display \(target.displayID)")
     }
 
     // MARK: - 全局操作

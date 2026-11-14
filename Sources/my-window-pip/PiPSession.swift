@@ -386,12 +386,19 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     }
 
     private func currentSourceRect() -> CGRect {
-        // 整窗 + 未放大 + 没有框选基准时不下发裁剪框：`.zero` 让 SCK 直接给整个窗口内容。
+        // 整窗 / 整屏 + 未放大 + 没有框选基准时不下发裁剪框：`.zero` 让 SCK 直接给完整内容。
         // 一旦用户框选了任意区域（selectedBaseRect != nil），即使 zoom 回到 1 也必须保留该 crop。
-        if selectedBaseRect == nil,
-           case .window = state.source,
-           state.zoom <= PiPSessionState.minZoom + 0.001,
-           abs(baseRect.minX) < 0.5, abs(baseRect.minY) < 0.5 {
+        let isFullContent: Bool
+        switch state.source {
+        case .window:
+            isFullContent = abs(baseRect.minX) < 0.5 && abs(baseRect.minY) < 0.5
+        case .display:
+            isFullContent = true
+        case .region:
+            isFullContent = false
+        }
+        if selectedBaseRect == nil, isFullContent,
+           state.zoom <= PiPSessionState.minZoom + 0.001 {
             return .zero
         }
         return currentVisibleSourceRect()
@@ -461,7 +468,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 self.syncBaseRectIfNeeded(with: window)
                 self.startStream(filter: CaptureEngine.filter(for: window))
             }
-        case let .region(displayID, _):
+        case .region, .display:
+            guard let displayID = state.source.displayID else { return }
             ShareableContentStore.shared.display(id: displayID) { [weak self] display in
                 guard let self, !self.isClosed else { return }
                 guard let display else {
@@ -644,8 +652,8 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                     self.applySourceHealth(health, windowID: windowID)
                 }
             }
-        case .region:
-            restartCapture(reason: "区域捕获恢复")
+        case .region, .display:
+            restartCapture(reason: "显示器捕获恢复")
         }
     }
 
@@ -942,6 +950,16 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
     func handleScreenParametersChanged() {
         guard !isClosed else { return }
         retune(reason: "屏幕参数变化")
+        // 显示器拔插 / 分辨率变化 / 全屏 Space 切换后，旧的 SCDisplay 快照可能已经失效。
+        // 只 updateConfiguration 不会换过滤器，继续用旧 display 会让 SCK 报错甚至中断流。
+        // 这里按 displayID 重新取一次 SCDisplay 并换掉过滤器（窗口流不需要换）。
+        guard let displayID = state.source.displayID else { return }
+        ShareableContentStore.shared.display(id: displayID) { [weak self] display in
+            guard let self, !self.isClosed, let display else { return }
+            let own = ShareableContentStore.shared.cachedOwnWindows
+            self.engine.retarget(CaptureEngine.filter(forDisplay: display,
+                                                      excludingOwnWindows: own))
+        }
     }
 
     private func persistGeometry() {
@@ -1105,7 +1123,7 @@ final class PiPSession: NSObject, CaptureEngineDelegate, PiPWindowDelegate {
                 )
             }
 
-        case .region:
+        case .region, .display:
             windowController.showHint(
                 L.t("该浮窗来自屏幕区域，没有可切换的源应用",
                     "This PiP captures a screen region — no source app to switch to"),

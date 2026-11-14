@@ -97,11 +97,18 @@ final class EventTapManager {
         fnCombinedWithKey = true
 
         let prefs = Preferences.shared
-        // 1. fn 组合热键：fn + <pip 热键的主键>，加 Shift 则是区域捕获
+        // 1. fn 组合热键（主键沿用 pip 热键）：
+        //    fn + 主键 = 前台窗口；fn + ⇧ + 主键 = 区域；fn + ⌥ + 主键 = 整块显示器
         if flags.contains(.maskSecondaryFn),
-           !flags.contains(.maskCommand), !flags.contains(.maskControl), !flags.contains(.maskAlternate),
+           !flags.contains(.maskCommand), !flags.contains(.maskControl),
            UInt32(keyCode) == prefs.pipHotkey.keyCode {
-            let action: HotkeyManager.Action = flags.contains(.maskShift) ? .region : .pip
+            let action: HotkeyManager.Action
+            if flags.contains(.maskAlternate) {
+                guard !flags.contains(.maskShift) else { return false }
+                action = .display
+            } else {
+                action = flags.contains(.maskShift) ? .region : .pip
+            }
             DispatchQueue.main.async { [weak self] in self?.onGlobalTrigger?(action) }
             return true
         }

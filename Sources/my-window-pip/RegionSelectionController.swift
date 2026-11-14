@@ -3,8 +3,8 @@ import AppKit
 /// 区域框选：在每块屏幕上盖一层遮罩，让用户拖出一个矩形。
 ///
 /// 交互：
-/// - 拖拽 → 自由矩形（限制在起始那块屏幕内）
-/// - 按住 `⌥` 单击 → 直接选中指针下的整个窗口
+/// - 拖拽 → 自由矩形（限制在起始那块屏幕内），捕获该屏幕区域的完整合成画面
+/// - 按住 `⌥` 单击 → 直接选中指针下的整个窗口（单窗口流，可跟随窗口移动）
 /// - `⎋` 或右键 → 取消
 final class RegionSelectionController {
     static let shared = RegionSelectionController()
@@ -14,11 +14,11 @@ final class RegionSelectionController {
         let screenRect: CGRect
         let screen: NSScreen
         let displayID: CGDirectDisplayID
-        /// 若选区落在某个窗口内，则给出该窗口信息，捕获时优先用窗口流（可跟随移动、被遮挡也能拍）
+        /// 选区中心命中的窗口（仅 ⌥ 单击 / 兼容模式下会据此升级为单窗口流）
         let hitWindowID: CGWindowID?
-        /// 命中窗口在「左上原点全局坐标」下的 frame（与 SCWindow.frame 同坐标系）
-        let hitWindowFrameTopLeft: CGRect?
-        let hitWindowOwnerPID: pid_t?
+        /// ⌥ 单击选中整个窗口：用户明确表达「只要这个窗口」，此时才允许切成单窗口流。
+        /// 普通拖拽一律用显示器合成流，保证同屏的悬浮窗、字幕、菜单栏都进画面。
+        let prefersWindowCapture: Bool
     }
 
     private var overlays: [RegionOverlayWindow] = []
@@ -99,8 +99,7 @@ final class RegionSelectionController {
             screen: targetScreen,
             displayID: displayID,
             hitWindowID: hit?.windowID,
-            hitWindowFrameTopLeft: hit?.frameTopLeft,
-            hitWindowOwnerPID: hit?.ownerPID
+            prefersWindowCapture: snapWindow
         ))
     }
 
@@ -115,7 +114,6 @@ final class RegionSelectionController {
         let windowID: CGWindowID
         /// 左上原点全局坐标（CGWindowList / SCWindow 使用的坐标系）
         let frameTopLeft: CGRect
-        let ownerPID: pid_t
     }
 
     /// 用 CGWindowList 由前到后找包含指定点（AppKit 全局坐标）的窗口，跳过自身 App 与非普通层窗口。
@@ -130,11 +128,11 @@ final class RegionSelectionController {
             guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
                   let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid != ownPID,
                   let idNum = info[kCGWindowNumber as String] as? UInt32,
-                  let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
-                  let rect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let rect = WindowBoundsParser.rect(from: boundsDict)
             else { continue }
             if rect.contains(flipped) {
-                return HitWindow(windowID: CGWindowID(idNum), frameTopLeft: rect, ownerPID: pid)
+                return HitWindow(windowID: CGWindowID(idNum), frameTopLeft: rect)
             }
         }
         return nil
@@ -237,8 +235,8 @@ private final class RegionSelectionView: NSView {
     }
 
     private func drawHint() {
-        let text = L.t("拖拽选择区域　·　⌥ 单击选中整个窗口　·　⎋ 取消",
-                       "Drag to select　·　⌥-click to grab a whole window　·　⎋ to cancel")
+        let text = L.t("拖拽框选屏幕区域（含所有窗口）　·　⌥ 单击只抓这个窗口　·　⎋ 取消",
+                       "Drag: screen region (all windows)　·　⌥-click: one window　·　⎋ cancel")
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
             .foregroundColor: NSColor.white.withAlphaComponent(0.9),

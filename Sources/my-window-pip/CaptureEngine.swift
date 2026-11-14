@@ -79,7 +79,7 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         SCContentFilter(desktopIndependentWindow: window)
     }
 
-    /// 显示器过滤器（区域捕获用）。必须排除自身 App，否则 PiP 浮窗会把自己拍进去形成镜中镜。
+    /// 显示器过滤器（区域 / 整屏捕获用）。必须排除自身 App，否则 PiP 浮窗会把自己拍进去形成镜中镜。
     ///
     /// 优先按「App」排除而非按「窗口」排除：新建的浮窗可能还没出现在窗口枚举缓存里，
     /// 按 App 排除能覆盖这种时序空窗；拿不到 `SCRunningApplication` 时退回按窗口排除。
@@ -139,10 +139,12 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     /// 裁剪矩形规范化：非法值退化为「完整内容」，并对齐到整点减少重采样模糊。
-    private static func sanitizedSourceRect(_ rect: CGRect) -> CGRect {
+    /// 负 origin 一律夹到 0：`sourceRect` 必须落在 filter 内容内部，多屏负坐标换算出错时
+    /// 下发负裁剪框在部分 macOS 版本会让流直接报错甚至中断（issue #13 的偶发崩溃路径之一）。
+    static func sanitizedSourceRect(_ rect: CGRect) -> CGRect {
         guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,
               rect.width >= 1, rect.height >= 1 else { return .zero }
-        return CGRect(x: rect.minX.rounded(), y: rect.minY.rounded(),
+        return CGRect(x: max(0, rect.minX.rounded()), y: max(0, rect.minY.rounded()),
                       width: rect.width.rounded(), height: rect.height.rounded())
     }
 

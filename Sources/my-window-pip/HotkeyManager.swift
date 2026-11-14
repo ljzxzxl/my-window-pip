@@ -12,6 +12,8 @@ final class HotkeyManager {
         case pip = 1
         case region = 2
         case closeAll = 3
+        /// 一键捕获外接显示器（或上次从菜单栏选中的显示器）
+        case display = 4
     }
 
     /// 主线程回调
@@ -41,6 +43,7 @@ final class HotkeyManager {
         register(prefs.pipHotkey, for: .pip)
         register(prefs.regionHotkey, for: .region)
         register(prefs.closeAllHotkey, for: .closeAll)
+        register(prefs.displayHotkey, for: .display)
     }
 
     func unregisterAll() {

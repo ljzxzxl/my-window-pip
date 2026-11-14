@@ -17,6 +17,10 @@ struct HotkeyConfig: Equatable, Codable {
     static let closeAllDefault = HotkeyConfig(
         keyCode: UInt32(kVK_ANSI_Backslash), carbonModifiers: UInt32(controlKey | optionKey)
     )
+    /// 一键捕获外接显示器（没有外接屏时捕获唯一/主屏）
+    static let displayDefault = HotkeyConfig(
+        keyCode: UInt32(kVK_ANSI_D), carbonModifiers: UInt32(controlKey | optionKey)
+    )
 
     var displayString: String {
         var s = ""
@@ -109,7 +113,12 @@ final class Preferences {
         static let hotkeyPiP = "hotkey.pip"
         static let hotkeyRegion = "hotkey.region"
         static let hotkeyCloseAll = "hotkey.closeAll"
+        static let hotkeyDisplay = "hotkey.display"
         static let enhancedMode = "enhancedMode"
+        /// 兼容开关：恢复旧版「框选自动升级成单窗口流」的行为
+        static let regionFollowsWindow = "regionFollowsWindow"
+        /// 上次从菜单栏选中的显示器，供整屏热键复用
+        static let lastCaptureDisplayID = "lastCaptureDisplayID"
         static let defaultFPS = "defaultFPS"
         static let autoHideDefault = "autoHideDefault"
         static let autoHideOpacity = "autoHideOpacity"
@@ -133,6 +142,7 @@ final class Preferences {
             K.autoHideOpacity: Double(Self.defaultAutoHideOpacity),
             K.idleDetectionDefault: true,
             K.enhancedMode: false,
+            K.regionFollowsWindow: false,
             K.windowLevelMode: WindowLevelMode.global.rawValue,
             K.showsCursor: false,
             K.hasSeenOnboarding: false,
@@ -191,6 +201,22 @@ final class Preferences {
         set { d.set(newValue, forKey: K.enhancedMode) }
     }
 
+    /// 默认关闭：框选走显示器合成流，能看到同屏的悬浮窗、字幕与菜单栏。
+    /// 打开后恢复旧行为：选区落在窗口内时自动升级为单窗口流（跟随窗口、被遮挡也能拍）。
+    var regionFollowsWindow: Bool {
+        get { d.bool(forKey: K.regionFollowsWindow) }
+        set { d.set(newValue, forKey: K.regionFollowsWindow) }
+    }
+
+    /// 菜单栏里最近一次手动选中的显示器（0 / 缺失表示没选过）。
+    var lastCaptureDisplayID: CGDirectDisplayID? {
+        get {
+            let value = d.integer(forKey: K.lastCaptureDisplayID)
+            return value > 0 ? CGDirectDisplayID(value) : nil
+        }
+        set { d.set(newValue.map { Int($0) } ?? 0, forKey: K.lastCaptureDisplayID) }
+    }
+
     var windowLevelMode: WindowLevelMode {
         get { WindowLevelMode(rawValue: d.string(forKey: K.windowLevelMode) ?? "") ?? .global }
         set { d.set(newValue.rawValue, forKey: K.windowLevelMode) }
@@ -245,10 +271,16 @@ final class Preferences {
         set { setHotkey(newValue, K.hotkeyCloseAll) }
     }
 
+    var displayHotkey: HotkeyConfig {
+        get { hotkey(K.hotkeyDisplay) ?? .displayDefault }
+        set { setHotkey(newValue, K.hotkeyDisplay) }
+    }
+
     func resetHotkeys() {
         pipHotkey = .pipDefault
         regionHotkey = .regionDefault
         closeAllHotkey = .closeAllDefault
+        displayHotkey = .displayDefault
     }
 
     private func hotkey(_ key: String) -> HotkeyConfig? {

@@ -536,6 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .pip: SessionStore.shared.pipFrontmostWindow()
             case .region: SessionStore.shared.beginRegionCapture()
             case .closeAll: SessionStore.shared.closeAll()
+            case .display: SessionStore.shared.capturePreferredDisplay()
             }
         }
         HotkeyManager.shared.start()
@@ -545,6 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .pip: SessionStore.shared.pipFrontmostWindow()
             case .region: SessionStore.shared.beginRegionCapture()
             case .closeAll: SessionStore.shared.closeAll()
+            case .display: SessionStore.shared.capturePreferredDisplay()
             }
         }
         EventTapManager.shared.onHoverKey = { key, sessionID in

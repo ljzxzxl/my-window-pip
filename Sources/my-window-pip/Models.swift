@@ -10,12 +10,14 @@ enum CaptureSource: Equatable {
     case window(id: CGWindowID, bundleID: String?, appName: String, title: String)
     /// 屏幕区域。`rect` 为 AppKit 全局坐标（左下原点，逻辑点）。
     case region(displayID: CGDirectDisplayID, rect: CGRect)
+    /// 整块显示器。`rect` 是该显示器的完整 frame（AppKit 全局坐标，逻辑点）。
+    case display(displayID: CGDirectDisplayID, name: String, rect: CGRect)
 
     /// per-app 偏好（帧率 / 宽度，以及位置的应用级回退）使用的存储键。
     var preferenceKey: String {
         switch self {
         case let .window(_, bundleID, appName, _): return bundleID ?? "app:\(appName)"
-        case .region: return Self.regionPreferenceKey
+        case .region, .display: return Self.regionPreferenceKey
         }
     }
 
@@ -26,10 +28,20 @@ enum CaptureSource: Equatable {
         return nil
     }
 
+    /// 显示器流（区域 / 整屏）共用的 displayID；窗口流为 nil。
+    var displayID: CGDirectDisplayID? {
+        switch self {
+        case let .region(displayID, _): return displayID
+        case let .display(displayID, _, _): return displayID
+        case .window: return nil
+        }
+    }
+
     var appName: String {
         switch self {
         case let .window(_, _, appName, _): return appName
         case .region: return L.t("屏幕区域", "Screen Region")
+        case .display: return L.t("显示器", "Display")
         }
     }
 
@@ -38,6 +50,8 @@ enum CaptureSource: Equatable {
         case let .window(_, _, _, title): return title
         case let .region(_, rect):
             return "\(Int(rect.width))×\(Int(rect.height))"
+        case let .display(_, name, rect):
+            return "\(name) · \(Int(rect.width))×\(Int(rect.height))"
         }
     }
 
@@ -57,6 +71,8 @@ enum PositionMemoryIdentity: Equatable {
     case window(appPreferenceKey: String, windowID: CGWindowID)
     case windowRegion(appPreferenceKey: String, windowID: CGWindowID, rect: CGRect)
     case displayRegion(displayID: CGDirectDisplayID, rect: CGRect)
+    /// 整屏捕获：位置只跟显示器绑定，屏幕参数变化导致 rect 改变时也仍然记得位置。
+    case display(displayID: CGDirectDisplayID)
 
     /// 沿用首版窗口级位置键前缀，避免开发版本之间丢失已经记住的整窗位置。
     static let specificPreferencePrefix = "__window_position__:"
@@ -69,6 +85,8 @@ enum PositionMemoryIdentity: Equatable {
             return "\(Self.specificPreferencePrefix)region:\(appKey):\(windowID):\(Self.rectKey(rect))"
         case let .displayRegion(displayID, rect):
             return "\(Self.specificPreferencePrefix)display:\(displayID):\(Self.rectKey(rect))"
+        case let .display(displayID):
+            return "\(Self.specificPreferencePrefix)fullDisplay:\(displayID)"
         }
     }
 
@@ -76,7 +94,7 @@ enum PositionMemoryIdentity: Equatable {
     var fallbackPreferenceKey: String {
         switch self {
         case let .window(appKey, _), let .windowRegion(appKey, _, _): return appKey
-        case .displayRegion: return CaptureSource.regionPreferenceKey
+        case .displayRegion, .display: return CaptureSource.regionPreferenceKey
         }
     }
 
@@ -90,7 +108,7 @@ enum PositionMemoryIdentity: Equatable {
             return .windowRegion(
                 appPreferenceKey: source.preferenceKey, windowID: windowID, rect: rect
             )
-        case .displayRegion:
+        case .displayRegion, .display:
             return self
         }
     }
@@ -189,6 +207,7 @@ struct SessionRequest {
     /// - 整窗 PiP：`(0, 0, 窗口宽, 窗口高)`
     /// - 窗口内的区域捕获：该区域在窗口内的局部矩形
     /// - 显示器区域捕获：该区域在显示器内的局部矩形
+    /// - 整屏捕获：`(0, 0, 显示器宽, 显示器高)`
     /// 缩放/平移都在这个基准矩形内部进行。
     var baseSourceRect: CGRect
     /// 基准矩形对应的物理像素尺寸，用于判断放大到多少倍仍有原生像素

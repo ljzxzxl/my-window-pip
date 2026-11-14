@@ -40,7 +40,8 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 
 **Picture-in-Picture**
 - Turn the frontmost window into a PiP with one hotkey (`⌃⌥P`), or pick a window from the menu bar list.
-- Capture any screen region (`⌃⌥⇧P`); if the selection lands inside a window, a window stream is used instead, so it follows the window and keeps working when the window is covered.
+- Capture a whole display in one click from *Capture a Display* in the menu bar, or with `⌃⌥D`. The hotkey prefers an external display (or the last display you picked from the menu), so you never have to drag a selection on a screen you cannot see.
+- Capture any screen region (`⌃⌥⇧P`) as the **composite of that part of the screen**: other windows, floating captions/overlays and the menu bar stay visible, even when a full-screen player covers the display. Hold `⌥` and click while selecting to grab just one window instead (it follows the window and keeps working when covered). The old "always follow the hit window" behaviour is still available in Settings → General.
 - Multiple PiP windows at once, cascaded automatically; each source window or captured region remembers its own position, while width remains app-level.
 - Drag a PiP near a screen edge or another PiP to snap it into place; adjacent PiPs join with no gap. Snapping never resizes the window; hold `Control` while dragging to bypass it temporarily.
 - Floating, borderless, aspect-locked, visible on all Spaces and above full-screen apps — but below system pop-up menus, so menu bar utilities still open on top of it.
@@ -72,8 +73,9 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 |---|---|---|
 | PiP frontmost window | `⌃⌥P` | configurable |
 | Capture region | `⌃⌥⇧P` | configurable |
+| Capture a whole display | `⌃⌥D` | configurable; prefers an external display |
 | Close all | `⌃⌥\` | configurable |
-| Grab a whole window | `⌥`-click | while selecting a region |
+| Grab a whole window | `⌥`-click | while selecting a region (single-window stream) |
 | Cancel selection | `⎋` or right-click | while selecting a region |
 | Zoom | `Cmd`-drag / `Cmd`-scroll | pointer over PiP |
 | Reset zoom | `Cmd`-double-click | pointer over PiP |
@@ -81,7 +83,7 @@ Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation
 | Switch to the source window | click the PiP | can be disabled in Settings |
 | Peek at a faded window | hold `⌥`, or rest the pointer on the top bar | while auto-hide has faded it |
 
-Enhanced mode (optional, requires Accessibility) adds `fn`+`P` / `fn`+`⇧`+`P` hotkeys and hover keys: `=` / `-` zoom, `F` frame rate, `D` idle detection, tap `fn` to hide/show, `⌫` to close. It is off by default, only intercepts those keys, and everything else passes through untouched.
+Enhanced mode (optional, requires Accessibility) adds `fn`+`P` / `fn`+`⇧`+`P` / `fn`+`⌥`+`P` (whole display) hotkeys and hover keys: `=` / `-` zoom, `F` frame rate, `D` idle detection, tap `fn` to hide/show, `⌫` to close. It is off by default, only intercepts those keys, and everything else passes through untouched.
 
 ### Permissions
 
@@ -203,7 +205,8 @@ verifies the signature and publishes a GitHub Release — the release path delib
 
 **画中画**
 - 一键把前台窗口变浮窗（`⌃⌥P`），或从菜单栏窗口列表里挑。
-- 框选任意屏幕区域做画中画（`⌃⌥⇧P`）；选区落在某个窗口内时自动改用窗口流，可跟随窗口移动、被遮挡也能捕获。
+- 一键捕获整块显示器：菜单栏「捕获整块显示器」子菜单点一下即可，或用 `⌃⌥D`（优先外接显示器 / 上次选中的那块），不必在朝向对方、自己看不见的外接屏上手动框选。
+- 框选任意屏幕区域做画中画（`⌃⌥⇧P`）；默认捕获该区域的**完整合成画面**——同屏的其它窗口、悬浮字幕、菜单栏都会进来，即使有全屏播放器盖住整块屏幕也不会退化成「只拍一个窗口」。框选时按住 `⌥` 单击可只抓那一个窗口（跟随窗口移动、被遮挡也能拍）；旧版「选区自动跟随窗口」的行为可在「设置 → 通用」里重新打开。
 - 多个浮窗同时运行，自动错位摆放；每个源窗口或捕获区域分别记忆位置，宽度仍按应用记忆。
 - 浮窗靠近屏幕可用区域边缘或其他浮窗时会自动无间隙吸附，同时避开菜单栏和 Dock。磁吸只调整位置、不改变窗口大小；拖动时按住 `Control` 可临时跳过磁吸。
 - 浮窗置顶、可在所有 Space 与全屏应用之上显示、无边框、锁定宽高比；但层级低于系统下拉菜单，浮窗放右上角也不会挡住菜单栏工具的菜单。
@@ -235,8 +238,9 @@ verifies the signature and publishes a GitHub Release — the release path delib
 |---|---|---|
 | 画中画前台窗口 | `⌃⌥P` | 设置里可改 |
 | 区域捕获 | `⌃⌥⇧P` | 设置里可改 |
+| 捕获整块显示器 | `⌃⌥D` | 设置里可改；优先外接显示器 |
 | 关闭全部浮窗 | `⌃⌥\` | 设置里可改 |
-| 框选时选中整个窗口 | 按住 `⌥` 单击 | 区域框选中 |
+| 框选时选中整个窗口 | 按住 `⌥` 单击 | 区域框选中（单窗口流） |
 | 取消区域框选 | `⎋` 或右键 | 区域框选中 |
 | 放大 / 缩小画面 | `Cmd` + 拖拽框选 / `Cmd` + 滚轮 | 鼠标在浮窗上 |
 | 复位画面倍率 | `Cmd` + 双击 | 鼠标在浮窗上 |
@@ -244,7 +248,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 | 切换到源应用窗口 | 单击浮窗 | 可在设置里关闭 |
 | 临时唤回已淡出的浮窗 | 按住 `⌥`，或把鼠标停在顶栏 | 开了自动隐藏时 |
 
-增强模式（可选，需要辅助功能权限）额外提供 `fn`+`P` / `fn`+`⇧`+`P` 热键，以及鼠标悬停时的裸键：`=` / `-` 调倍率、`F` 切帧率、`D` 切静止检测、轻点 `fn` 显隐、`⌫` 关闭。默认关闭；开启后只拦截上述按键，其余按键一律原样透传。
+增强模式（可选，需要辅助功能权限）额外提供 `fn`+`P` / `fn`+`⇧`+`P` / `fn`+`⌥`+`P`（整块显示器）热键，以及鼠标悬停时的裸键：`=` / `-` 调倍率、`F` 切帧率、`D` 切静止检测、轻点 `fn` 显隐、`⌫` 关闭。默认关闭；开启后只拦截上述按键，其余按键一律原样透传。
 
 ### 权限
 

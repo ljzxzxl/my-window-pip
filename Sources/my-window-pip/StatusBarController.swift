@@ -7,6 +7,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let windowsMenu = NSMenu()
+    private let displaysMenu = NSMenu()
     private var cachedGroups: [WindowGroup] = []
     private var pendingUpdate: ReleaseInfo?
 
@@ -144,6 +145,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             action: #selector(captureRegion)
         )
 
+        // 一键捕获整块显示器：不用在外接屏（可能朝向对方、自己看不见）上框选。
+        let displayHint = prefs.displayHotkey.enabled ? prefs.displayHotkey.displayString : nil
+        let displaysTitle = L.t("捕获整块显示器", "Capture a Display")
+            + (displayHint.map { "　\($0)" } ?? "")
+        let displaysItem = NSMenuItem(title: displaysTitle, action: nil, keyEquivalent: "")
+        displaysItem.image = NSImage(systemSymbolName: "display", accessibilityDescription: nil)
+        displaysItem.submenu = displaysMenu
+        menu.addItem(displaysItem)
+        populateDisplaysMenu()
+
         let windowsItem = NSMenuItem(title: L.t("选择窗口", "Choose Window"), action: nil, keyEquivalent: "")
         windowsItem.image = NSImage(systemSymbolName: "macwindow.on.rectangle", accessibilityDescription: nil)
         windowsItem.submenu = windowsMenu
@@ -210,6 +221,46 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         addItem(title: L.t("退出 MyWindowPip", "Quit MyWindowPip"), hint: "⌘Q", symbol: "power",
                 action: #selector(quit))
+    }
+
+    private func populateDisplaysMenu() {
+        displaysMenu.removeAllItems()
+        let targets = SessionStore.availableDisplays()
+        guard !targets.isEmpty else {
+            let item = NSMenuItem(title: L.t("没有可用的显示器", "No display available"),
+                                  action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            displaysMenu.addItem(item)
+            return
+        }
+
+        for target in targets {
+            var parts = [target.name, target.dimensions,
+                         target.isBuiltin ? L.t("内建", "Built-in") : L.t("外接", "External")]
+            if target.isMain { parts.append(L.t("主屏", "Main")) }
+            let item = NSMenuItem(title: "  \(parts.joined(separator: " · "))",
+                                  action: #selector(captureDisplay(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = NSNumber(value: target.displayID)
+            item.image = NSImage(systemSymbolName: target.isBuiltin ? "laptopcomputer" : "display",
+                                 accessibilityDescription: nil)
+            if store.sessions.contains(where: { session in
+                guard case let .display(displayID, _, _) = session.state.source else { return false }
+                return displayID == target.displayID
+            }) {
+                item.state = .on
+            }
+            displaysMenu.addItem(item)
+        }
+
+        displaysMenu.addItem(.separator())
+        let hintItem = NSMenuItem(
+            title: L.t("  热键优先捕获外接显示器，或上次在这里选中的那块",
+                       "  Hotkey targets an external display, or the last one picked here"),
+            action: nil, keyEquivalent: ""
+        )
+        hintItem.isEnabled = false
+        displaysMenu.addItem(hintItem)
     }
 
     private func populateWindowsMenu() {
@@ -368,6 +419,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func pipFrontmost() { store.pipFrontmostWindow() }
 
     @objc private func captureRegion() { store.beginRegionCapture() }
+
+    @objc private func captureDisplay(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? NSNumber else { return }
+        store.captureDisplay(displayID: CGDirectDisplayID(number.uint32Value))
+    }
 
     @objc private func pipWindow(_ sender: NSMenuItem) {
         guard let number = sender.representedObject as? NSNumber else { return }

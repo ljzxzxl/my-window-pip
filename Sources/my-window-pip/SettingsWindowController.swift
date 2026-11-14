@@ -111,6 +111,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             on: prefs.showsCursor, action: #selector(showsCursorChanged(_:))
         ))
         stack.addArrangedSubview(checkbox(
+            L.t("框选时只拍命中的窗口（旧行为）", "Region captures only the hit window (legacy)"),
+            on: prefs.regionFollowsWindow, action: #selector(regionFollowsWindowChanged(_:))
+        ))
+        stack.addArrangedSubview(checkbox(
             L.t("单击浮窗切换到源应用窗口", "Click a PiP window to switch to its source app"),
             on: prefs.clickToActivateSource, action: #selector(clickToActivateChanged(_:))
         ))
@@ -159,6 +163,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             self?.reloadHotkeys()
         }
         stack.addArrangedSubview(row(L.t("区域捕获", "Region capture"), regionRecorder))
+        stack.addArrangedSubview(hint(L.t(
+            "框选默认捕获屏幕区域的完整画面（含同屏的悬浮窗、字幕与菜单栏）；⌥ 单击只抓一个窗口。",
+            "A region captures everything in that part of the screen, including overlays, captions and the menu bar; ⌥-click grabs one window only."
+        )))
+
+        let displayRecorder = HotkeyRecorderView(config: prefs.displayHotkey)
+        displayRecorder.onChange = { [weak self] cfg in
+            self?.prefs.displayHotkey = cfg
+            self?.reloadHotkeys()
+        }
+        stack.addArrangedSubview(row(L.t("捕获整块显示器", "Capture a whole display"), displayRecorder))
 
         let closeRecorder = HotkeyRecorderView(config: prefs.closeAllHotkey)
         closeRecorder.onChange = { [weak self] cfg in
@@ -205,7 +220,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         stack.addArrangedSubview(hint(L.t(
             """
             增强模式提供两类零权限模式做不到的操作：
-            · fn 组合热键：fn + P 画中画前台窗口，fn + ⇧ + P 区域捕获
+            · fn 组合热键：fn + P 画中画前台窗口，fn + ⇧ + P 区域捕获，fn + ⌥ + P 整块显示器
             · 鼠标悬停在浮窗上时的裸键：= / - 调倍率，F 切帧率，D 切静止检测，⌫ 关闭，轻点 fn 显隐
 
             注意：悬停按键会在鼠标位于浮窗范围内时拦截上述按键，其余按键一律原样透传。
@@ -213,7 +228,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             """,
             """
             Enhanced mode adds two things the permission-free mode cannot do:
-            · fn-based hotkeys: fn + P for the frontmost window, fn + ⇧ + P for region capture
+            · fn-based hotkeys: fn + P for the frontmost window, fn + ⇧ + P for region capture, fn + ⌥ + P for a whole display
             · Hover keys: = / - zoom, F frame rate, D idle detection, ⌫ close, tap fn to hide/show
 
             Note: hover keys are only intercepted while the pointer is inside a PiP window; all other \
@@ -386,6 +401,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func showsCursorChanged(_ sender: NSButton) {
         prefs.showsCursor = sender.state == .on
+    }
+
+    @objc private func regionFollowsWindowChanged(_ sender: NSButton) {
+        prefs.regionFollowsWindow = sender.state == .on
     }
 
     @objc private func clickToActivateChanged(_ sender: NSButton) {

@@ -182,6 +182,8 @@ enum SourceWindowActivator {
             target, kAXSizeAttribute as CFString, &raw
         ) == .success, let value = raw, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var size = CGSize.zero
+        // 上一行已用 CFGetTypeID 校验过类型，这里的 CF 桥接不会再失败；
+        // Swift 对 CoreFoundation 类型的 `as?` 会报 "always succeed"，故保留显式桥接。
         guard AXValueGetValue(value as! AXValue, .cgSize, &size) else { return nil }
         return size
     }
