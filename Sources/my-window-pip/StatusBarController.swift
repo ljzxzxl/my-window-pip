@@ -26,6 +26,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         statusItem.button?.toolTip = "MyWindowPip"
         menu.delegate = self
         windowsMenu.delegate = self
+        displaysMenu.delegate = self
         statusItem.menu = menu
 
         store.onChange = { [weak self] in self?.refreshIcon() }
@@ -83,6 +84,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             refreshWindowList()
         } else if menu === windowsMenu {
             refreshWindowList()
+        } else if menu === displaysMenu {
+            // 显示器可能在主菜单保持打开期间插拔，子菜单展开时再取一次最新列表
+            populateDisplaysMenu()
         }
     }
 

@@ -28,9 +28,9 @@
   </tr>
 </table>
 
-Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) to capture a single window (never the whole screen), with per-app frame rates and idle detection, so CPU usage stays close to zero at low frame rates. Universal binary for **Apple Silicon (arm64)** and **Intel (x64)**, macOS 14 or later. Open source (MIT), no account, no telemetry.
+Built on the system [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) to capture a single window, a screen region, or a whole display, with per-app frame rates and idle detection, so CPU usage stays close to zero at low frame rates. Universal binary for **Apple Silicon (arm64)** and **Intel (x64)**, macOS 14 or later. Open source (MIT), no account, no telemetry.
 
-底层用系统的 [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) 单窗口捕获（不录整屏），配合按应用记忆的帧率与静止检测，低帧率下 CPU 占用接近 0。通用二进制，同时支持 **Apple Silicon (arm64)** 与 **Intel (x64)**，需要 macOS 14 及以上。开源（MIT）、无账号、无遥测。
+底层用系统的 [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit) 捕获单个窗口、屏幕区域或整块显示器，配合按应用记忆的帧率与静止检测，低帧率下 CPU 占用接近 0。通用二进制，同时支持 **Apple Silicon (arm64)** 与 **Intel (x64)**，需要 macOS 14 及以上。开源（MIT）、无账号、无遥测。
 
 [English](#english) | [中文](#中文)
 
@@ -89,7 +89,7 @@ Enhanced mode (optional, requires Accessibility) adds `fn`+`P` / `fn`+`⇧`+`P` 
 
 | Permission | Required | Purpose |
 |---|---|---|
-| Screen & System Audio Recording | **yes** | ScreenCaptureKit window capture |
+| Screen & System Audio Recording | **yes** | ScreenCaptureKit window / region / display capture |
 | Accessibility | optional | exact source-window switching; Enhanced mode (fn hotkeys, hover keys) |
 
 The system prompt appears on first launch and the app registers itself under *System Settings → Privacy & Security → Screen & System Audio Recording*, so you just flip the switch — no need to add it manually with the "+" button. macOS only applies the grant after a restart; the guide dialog has a "Relaunch app" button for that.
@@ -254,7 +254,7 @@ verifies the signature and publishes a GitHub Release — the release path delib
 
 | 权限 | 是否必需 | 用途 |
 |---|---|---|
-| 屏幕录制与系统录音 | **必需** | ScreenCaptureKit 捕获窗口画面 |
+| 屏幕录制与系统录音 | **必需** | ScreenCaptureKit 捕获窗口、屏幕区域或整块显示器画面 |
 | 辅助功能 | 可选 | 精确切换到源窗口；增强模式（fn 组合键、悬停按键） |
 
 首次启动会弹出系统的屏幕录制授权框，本应用会自动出现在「系统设置 → 隐私与安全性 → 屏幕录制与系统录音」列表里，**直接打开开关即可，不需要手动点加号添加**。macOS 要求授权后重启应用才生效，引导框里有「重新启动应用」按钮。

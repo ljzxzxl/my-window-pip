@@ -20,6 +20,18 @@ struct DisplayTarget: Equatable {
     }
 }
 
+/// 整屏捕获由谁触发。
+///
+/// 只有用户在菜单栏**显式选中**的显示器才应被记住。热键是自动推断出来的目标，
+/// 若也写入 `lastCaptureDisplayID`，外接屏拔掉后热键会回退到内建屏并把偏好覆写成内建屏，
+/// 外接屏重新接入时就再也不会「优先外接屏」了（issue #12 的核心场景）。
+enum DisplayCaptureTrigger {
+    case menu
+    case hotkey
+
+    var remembersDisplayForHotkey: Bool { self == .menu }
+}
+
 /// 整屏捕获的目标选择。纯逻辑，不触碰 AppKit，便于回归测试。
 enum DisplayCaptureTarget {
     static func withID(_ id: CGDirectDisplayID,

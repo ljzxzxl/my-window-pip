@@ -341,7 +341,8 @@ final class SessionStore {
                                 "macOS is not reporting any connected display."))
             return
         }
-        createDisplaySession(target)
+        // 热键是自动推断的目标，不能覆写用户在菜单栏里显式选过的显示器。
+        createDisplaySession(target, trigger: .hotkey)
     }
 
     /// 菜单栏入口：捕获指定的整块显示器。
@@ -350,10 +351,10 @@ final class SessionStore {
             Log.warn("显示器 \(displayID) 已断开，忽略整屏捕获")
             return
         }
-        createDisplaySession(target)
+        createDisplaySession(target, trigger: .menu)
     }
 
-    private func createDisplaySession(_ target: DisplayTarget) {
+    private func createDisplaySession(_ target: DisplayTarget, trigger: DisplayCaptureTrigger) {
         guard Permissions.ensureScreenRecording() else { return }
         guard let screen = NSScreen.screens.first(where: {
             RegionSelectionController.displayID(of: $0) == target.displayID
@@ -372,7 +373,11 @@ final class SessionStore {
             return
         }
         guard confirmIfOverLimit() else { return }
-        Preferences.shared.lastCaptureDisplayID = target.displayID
+        // 只记住菜单栏的显式选择：热键回退到内建屏时若写入偏好，外接屏重新接入后
+        // 「优先外接屏」会永久失效，除非用户再手动去菜单点一次（issue #12）。
+        if trigger.remembersDisplayForHotkey {
+            Preferences.shared.lastCaptureDisplayID = target.displayID
+        }
 
         let scale = screen.backingScaleFactor
         // 整屏在显示器局部坐标里就是 (0, 0, w, h)；SCK 侧用 .zero 表示「完整内容」。

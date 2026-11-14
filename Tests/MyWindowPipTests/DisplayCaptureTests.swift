@@ -141,4 +141,27 @@ final class DisplayCaptureTests: XCTestCase {
             "Width": NSNumber(value: 0), "Height": NSNumber(value: 100),
         ]))
     }
+
+    // MARK: - 热键不得覆写菜单选择（issue #12 回归）
+
+    func testOnlyMenuSelectionIsRememberedForHotkey() {
+        XCTAssertTrue(DisplayCaptureTrigger.menu.remembersDisplayForHotkey)
+        XCTAssertFalse(DisplayCaptureTrigger.hotkey.remembersDisplayForHotkey)
+    }
+
+    func testHotkeyFallbackMustNotBreakExternalPreferenceAfterReconnect() {
+        let builtin = display(1, "Built-in", main: true, builtin: true)
+        let external = display(2, "External")
+
+        // 1. 外接屏拔掉后按热键：只能回退到内建屏
+        XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [builtin], lastUsedID: 2), builtin)
+        // 2. 该回退不能写进 lastCaptureDisplayID（否则第 3 步会退化）
+        XCTAssertFalse(DisplayCaptureTrigger.hotkey.remembersDisplayForHotkey)
+        // 3. 外接屏重新接入，偏好仍为空 → 热键重新优先外接屏
+        XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [builtin, external], lastUsedID: nil),
+                       external)
+        // 4. 反例：若被错误地覆写成内建屏 ID，就会永远返回内建屏
+        XCTAssertEqual(DisplayCaptureTarget.hotkeyTarget(in: [builtin, external], lastUsedID: 1),
+                       builtin)
+    }
 }
