@@ -166,8 +166,8 @@ Built-in self-tests (no UI, useful after any change):
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # real download + SHA256 check
 ```
 
-Pull requests and pushes to `main` run the warning-free build and unit tests on macOS 14 (GitHub runners ship a
-full Xcode). Pushing a `v*` tag (matching `VERSION`) builds the universal binary with `scripts/build-app.sh`,
+Pull requests and pushes to `main` run the warning-free build and unit tests on a macOS runner (GitHub runners
+ship a full Xcode). Pushing a `v*` tag (matching `VERSION`) builds the universal binary with `scripts/build-app.sh`,
 verifies the signature and publishes a GitHub Release — the release path deliberately does not depend on XCTest.
 
 ### Repository layout
@@ -331,7 +331,7 @@ swift test                             # renderer 自愈与窗口磁吸单元测
 ./build/MyWindowPip.app/Contents/MacOS/my-window-pip --smoke-update     # 真实下载 + SHA256 校验
 ```
 
-PR 与推送到 `main` 会在 macOS 14 上执行零警告编译和单元测试（GitHub runner 自带完整 Xcode）；推送与
+PR 与推送到 `main` 会在 macOS runner 上执行零警告编译和单元测试（GitHub runner 自带完整 Xcode）；推送与
 `VERSION` 一致的 `v*` tag 则用 `scripts/build-app.sh` 构建通用二进制、校验签名并发布 Release——
 发版路径刻意不依赖 XCTest。
 
